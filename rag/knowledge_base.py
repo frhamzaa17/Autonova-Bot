@@ -11,7 +11,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from utils.config import Settings, load_settings
 
 
-SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx"}
+SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx", ".xlsx"}
 
 
 def _embeddings(settings: Settings) -> OllamaEmbeddings:
@@ -26,18 +26,39 @@ def _load_file(path: Path) -> list[Document]:
         return PyPDFLoader(str(path)).load()
     if suffix == ".docx":
         return Docx2txtLoader(str(path)).load()
+    if suffix == ".xlsx":
+        from openpyxl import load_workbook
+
+        workbook = load_workbook(path, data_only=False)
+        docs = []
+        for sheet in workbook.worksheets:
+            rows = []
+            for row in sheet.iter_rows(values_only=True):
+                values = [str(value) for value in row if value is not None]
+                if values:
+                    rows.append(" | ".join(values))
+            if rows:
+                docs.append(Document(page_content="\n".join(rows), metadata={"source": str(path), "sheet": sheet.title}))
+        return docs
     return []
 
 
-def _vector_store(settings: Settings) -> Chroma:
+def _collection_name(tenant_id: str | None = None) -> str:
+    if not tenant_id:
+        return "local_knowledge"
+    safe = "".join(char if char.isalnum() or char in {"_", "-"} else "_" for char in tenant_id)
+    return f"local_knowledge_{safe}"[:63]
+
+
+def _vector_store(settings: Settings, tenant_id: str | None = None) -> Chroma:
     return Chroma(
-        collection_name="local_knowledge",
+        collection_name=_collection_name(tenant_id),
         persist_directory=str(settings.chroma_dir),
         embedding_function=_embeddings(settings),
     )
 
 
-def ingest_data_folder(settings: Settings | None = None) -> int:
+def ingest_data_folder(settings: Settings | None = None, tenant_id: str | None = None) -> int:
     settings = settings or load_settings()
     docs: list[Document] = []
     for path in settings.data_dir.rglob("*"):
@@ -49,15 +70,30 @@ def ingest_data_folder(settings: Settings | None = None) -> int:
 
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=160)
     chunks = splitter.split_documents(docs)
-    store = _vector_store(settings)
+    store = _vector_store(settings, tenant_id)
     store.add_documents(chunks)
     return len(chunks)
 
 
-def retrieve_context(query: str, min_relevance: float = 0.35, k: int = 4) -> tuple[str, bool]:
+def ingest_file(path: Path, tenant_id: str) -> int:
     settings = load_settings()
-    store = _vector_store(settings)
-    results = store.similarity_search_with_relevance_scores(query, k=k)
+    docs = _load_file(path)
+    if not docs:
+        return 0
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=160)
+    chunks = splitter.split_documents(docs)
+    store = _vector_store(settings, tenant_id)
+    store.add_documents(chunks)
+    return len(chunks)
+
+
+def retrieve_context(query: str, min_relevance: float = 0.35, k: int = 4, tenant_id: str | None = None) -> tuple[str, bool]:
+    settings = load_settings()
+    store = _vector_store(settings, tenant_id)
+    try:
+        results = store.similarity_search_with_relevance_scores(query, k=k)
+    except Exception:
+        return "", False
     relevant = [(doc, score) for doc, score in results if score >= min_relevance]
     if not relevant:
         return "", False

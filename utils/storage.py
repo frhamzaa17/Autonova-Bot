@@ -58,6 +58,17 @@ def add_knowledge(text: str, source: str) -> dict[str, Any]:
     return entry
 
 
+def tenant_for_chat(chat_id: int) -> str:
+    state = get_chat_state(chat_id)
+    return state.get("tenant_id") or f"telegram_{chat_id}"
+
+
+def set_tenant_for_chat(chat_id: int, company_name: str) -> dict[str, Any]:
+    safe = "".join(char if char.isalnum() else "_" for char in company_name.strip().lower())
+    safe = "_".join(part for part in safe.split("_") if part)
+    return update_chat_state(chat_id, {"tenant_id": safe or f"telegram_{chat_id}", "company_name": company_name.strip()})
+
+
 def get_chat_state(chat_id: int) -> dict[str, Any]:
     states = read_json("conversation_state.json", {})
     return states.get(str(chat_id), {})
@@ -71,3 +82,22 @@ def update_chat_state(chat_id: int, updates: dict[str, Any]) -> dict[str, Any]:
     states[str(chat_id)] = state
     write_json("conversation_state.json", states)
     return state
+
+
+def append_chat_history(chat_id: int, role: str, content: str, limit: int = 12) -> list[dict[str, str]]:
+    states = read_json("conversation_state.json", {})
+    state = states.get(str(chat_id), {})
+    history = state.get("history", [])
+    history.append({"role": role, "content": content[:2000]})
+    state["history"] = history[-limit:]
+    state["updated_at"] = now_iso()
+    states[str(chat_id)] = state
+    write_json("conversation_state.json", states)
+    return state["history"]
+
+
+def conversation_context(chat_id: int, limit: int = 8) -> str:
+    history = get_chat_state(chat_id).get("history", [])[-limit:]
+    if not history:
+        return ""
+    return "\n".join(f"{item['role']}: {item['content']}" for item in history)
