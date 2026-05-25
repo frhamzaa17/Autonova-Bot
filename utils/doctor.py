@@ -9,6 +9,7 @@ from dataclasses import dataclass
 import requests
 
 from utils.config import Settings
+from rag.ocr import DEFAULT_TESSERACT_PATH
 
 
 REQUIRED_IMPORTS = {
@@ -24,6 +25,8 @@ REQUIRED_IMPORTS = {
     "pypdf": "pypdf",
     "dotenv": "python-dotenv",
     "requests": "requests",
+    "PIL": "Pillow",
+    "pytesseract": "pytesseract",
 }
 
 
@@ -59,6 +62,11 @@ def run_doctor(settings: Settings) -> CheckResult:
     lines.append(f"FFmpeg: {'OK' if ffmpeg_ok else 'MISSING'}")
     if not ffmpeg_ok:
         missing.append("winget install Gyan.FFmpeg")
+
+    tesseract_ok = shutil.which("tesseract") is not None or DEFAULT_TESSERACT_PATH.exists()
+    lines.append(f"Tesseract OCR: {'OK' if tesseract_ok else 'MISSING'}")
+    if not tesseract_ok:
+        missing.append("winget install UB-Mannheim.TesseractOCR")
 
     ollama_cli_ok = shutil.which("ollama") is not None
     lines.append(f"Ollama CLI: {'OK' if ollama_cli_ok else 'MISSING'}")

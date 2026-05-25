@@ -10,9 +10,10 @@ from langchain_ollama import OllamaEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from utils.config import Settings, load_settings, safe_workspace_id
+from rag.ocr import IMAGE_EXTENSIONS, is_image_file, extract_image_text
 
 
-SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx", ".xlsx"}
+SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx", ".xlsx"} | IMAGE_EXTENSIONS
 TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
@@ -22,6 +23,9 @@ def _embeddings(settings: Settings) -> OllamaEmbeddings:
 
 def _load_file(path: Path) -> list[Document]:
     suffix = path.suffix.lower()
+    if is_image_file(path):
+        text = extract_image_text(path)
+        return [Document(page_content=text, metadata={"source": str(path), "kind": "ocr_image"})] if text else []
     if suffix in {".txt", ".md"}:
         return TextLoader(str(path), encoding="utf-8").load()
     if suffix == ".pdf":

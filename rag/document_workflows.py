@@ -49,7 +49,10 @@ def create_source_document_bundle(
     if not source:
         return None
 
-    text = _text_for_file(source)
+    try:
+        text = _text_for_file(source)
+    except Exception:
+        return None
     if not text.strip():
         return None
 

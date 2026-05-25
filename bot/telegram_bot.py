@@ -112,6 +112,13 @@ def _wants_document_edit(instruction: str) -> bool:
     return any(word in lower for word in EDIT_WORDS)
 
 
+def _ingest_safely(path: Path, tenant_id: str) -> tuple[int, str | None]:
+    try:
+        return ingest_file(path, tenant_id), None
+    except Exception as exc:
+        return 0, str(exc)
+
+
 async def _send_document_bundle(update: Update, chat_id: int, text: str, summary: str, files: list[Path]) -> None:
     update_chat_state(
         chat_id,
@@ -375,7 +382,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     append_chat_history(chat_id, "user", f"Uploaded {path.name} with instruction: {instruction}")
 
     if wants_ingest or not _wants_document_edit(instruction):
-        chunks = ingest_file(path, tenant_id)
+        chunks, ingest_error = _ingest_safely(path, tenant_id)
         update_chat_state(
             chat_id,
             {
@@ -386,6 +393,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         if chunks:
             message = f"{path.name} has been saved. You can now ask questions about it."
+        elif ingest_error:
+            message = f"{path.name} has been saved, but I could not read its text clearly. {ingest_error}"
         else:
             message = f"{path.name} has been saved, but I could not read its text clearly."
         await update.message.reply_text(message)
@@ -422,11 +431,45 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await update.message.reply_text(answer[:4096])
         append_chat_history(chat_id, "assistant", answer)
     else:
-        chunks = ingest_file(path, tenant_id)
+        chunks, ingest_error = _ingest_safely(path, tenant_id)
         if chunks:
             await update.message.reply_text(f"{path.name} has been saved. You can now ask questions about it.")
+        elif ingest_error:
+            await update.message.reply_text(f"{path.name} has been saved, but I could not read its text clearly. {ingest_error}")
         else:
             await update.message.reply_text(f"{path.name} has been saved, but I could not read its text clearly.")
+
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    settings = load_settings()
+    if await _reject_if_needed(update, settings):
+        return
+    chat_id = update.effective_chat.id
+    tenant_id = tenant_for_chat(chat_id)
+    photo = update.message.photo[-1]
+    tg_file = await context.bot.get_file(photo.file_id)
+    path = tenant_uploads_dir(settings, tenant_id) / f"{photo.file_unique_id}.jpg"
+    await tg_file.download_to_drive(str(path))
+    caption = (update.message.caption or "").strip()
+    append_chat_history(chat_id, "user", f"Uploaded image document {path.name}" + (f" with instruction: {caption}" if caption else ""))
+
+    chunks, ingest_error = _ingest_safely(path, tenant_id)
+    update_chat_state(
+        chat_id,
+        {
+            "last_uploaded_file": str(path),
+            "last_deliverable_type": "knowledge_file",
+            "last_upload_mode": "knowledge",
+        },
+    )
+    if chunks:
+        message = f"{path.name} has been saved. You can now ask questions about it."
+    elif ingest_error:
+        message = f"{path.name} has been saved, but I could not read its text clearly. {ingest_error}"
+    else:
+        message = f"{path.name} has been saved, but I could not read its text clearly."
+    await update.message.reply_text(message)
+    append_chat_history(chat_id, "assistant", message)
 
 
 def run_bot() -> None:
@@ -439,5 +482,6 @@ def run_bot() -> None:
     app.add_handler(CommandHandler("company", company))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.run_polling(allowed_updates=Update.ALL_TYPES)

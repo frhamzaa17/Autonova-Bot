@@ -8,6 +8,7 @@ from openpyxl import load_workbook
 from pypdf import PdfReader
 
 from rag.knowledge_base import _candidate_files, _tokens
+from rag.ocr import is_image_file, extract_image_text
 from utils.config import load_settings, safe_workspace_id
 from llm.ollama_client import generate_response
 
@@ -43,6 +44,8 @@ def _read_pdf(path: Path) -> str:
 
 def _text_for_file(path: Path) -> str:
     suffix = path.suffix.lower()
+    if is_image_file(path):
+        return extract_image_text(path)
     if suffix == ".pdf":
         return _read_pdf(path)
     if suffix in {".txt", ".md"}:
@@ -213,7 +216,10 @@ def answer_document_records(query: str, tenant_id: str | None = None, preferred_
     if not target:
         return None
 
-    records = _records_for_file(target)
+    try:
+        records = _records_for_file(target)
+    except Exception as exc:
+        return f"I found {target.name}, but I could not read its text clearly. {exc}"
     if not records:
         return None
 
@@ -330,7 +336,10 @@ def answer_document_count(query: str, tenant_id: str | None = None, preferred_fi
     if not target:
         return None
 
-    count = _count_questions(target) if QUESTION_RE.search(query) else _count_file(target)
+    try:
+        count = _count_questions(target) if QUESTION_RE.search(query) else _count_file(target)
+    except Exception as exc:
+        return f"I found {target.name}, but I could not read its text clearly. {exc}"
     if not count:
         return f"I found {target.name}, but I could not extract countable records from it."
 
@@ -352,7 +361,10 @@ def answer_full_document_query(query: str, tenant_id: str | None = None, preferr
     if not target:
         return None
 
-    text = _text_for_file(target)
+    try:
+        text = _text_for_file(target)
+    except Exception as exc:
+        return f"I found {target.name}, but I could not read its text clearly. {exc}"
     if not text.strip():
         return f"I found {target.name}, but I could not extract readable text/table content from it."
 

@@ -264,9 +264,58 @@ def update_xlsx(path: Path, instruction: str, tenant_id: str | None = None) -> P
         for row in range(2, sheet.max_row + 1):
             sheet.cell(row=row, column=status_col).value = status_value
 
+    insert_row_match = re.search(r"\b(?:insert|add)\s+row\s+(\d+)", instruction, flags=re.I)
+    if insert_row_match:
+        sheet.insert_rows(int(insert_row_match.group(1)))
+
+    delete_row_match = re.search(r"\b(?:delete|remove)\s+row\s+(\d+)", instruction, flags=re.I)
+    if delete_row_match:
+        sheet.delete_rows(int(delete_row_match.group(1)))
+
+    insert_col_match = re.search(r"\b(?:insert|add)\s+column\s+([a-z]+)(?:\s+(?:named|as|header)\s+(.+?))?$", instruction, flags=re.I)
+    if insert_col_match:
+        column_letter, header = insert_col_match.groups()
+        column_index = openpyxl_column_index(column_letter)
+        sheet.insert_cols(column_index)
+        if header:
+            sheet.cell(row=1, column=column_index).value = header.strip()
+
+    delete_col_match = re.search(r"\b(?:delete|remove)\s+column\s+([a-z]+)", instruction, flags=re.I)
+    if delete_col_match:
+        sheet.delete_cols(openpyxl_column_index(delete_col_match.group(1)))
+
+    aggregate_match = re.search(r"\b(sum|average|avg|count)\s+column\s+([a-z]+)\s+(?:in|to|at)\s+([a-z]+\d+)", instruction, flags=re.I)
+    if aggregate_match:
+        operation, source_col, target_cell = aggregate_match.groups()
+        source_col = source_col.upper()
+        target_cell = target_cell.upper()
+        function_name = "AVERAGE" if operation.lower() in {"average", "avg"} else operation.upper()
+        sheet[target_cell] = f"={function_name}({source_col}2:{source_col}{sheet.max_row})"
+
+    formula_col_match = re.search(r"\b(?:set|add|create)\s+column\s+([a-z]+)\s*(?:=|as)\s*(.+)", instruction, flags=re.I)
+    if formula_col_match:
+        column_letter, expression = formula_col_match.groups()
+        column_index = openpyxl_column_index(column_letter)
+        headers = {
+            str(cell.value).strip().lower(): cell.column_letter
+            for cell in sheet[1]
+            if cell.value is not None
+        }
+        for header, letter in sorted(headers.items(), key=lambda item: len(item[0]), reverse=True):
+            expression = re.sub(rf"\b{re.escape(header)}\b", letter, expression, flags=re.I)
+        for row in range(2, sheet.max_row + 1):
+            row_expression = re.sub(r"\b([A-Z]+)\b", lambda match: f"{match.group(1)}{row}", expression.upper())
+            sheet.cell(row=row, column=column_index).value = row_expression if row_expression.startswith("=") else f"={row_expression}"
+
     output = output_dir / f"{path.stem}_edited{path.suffix}"
     workbook.save(output)
     return output
+
+
+def openpyxl_column_index(column_letter: str) -> int:
+    from openpyxl.utils.cell import column_index_from_string
+
+    return column_index_from_string(column_letter.upper())
 
 
 def edit_pdf_as_new_pdf(path: Path, instruction: str, revised_text: str | None = None, tenant_id: str | None = None) -> Path:
