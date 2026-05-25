@@ -91,4 +91,13 @@ def run_doctor(settings: Settings) -> CheckResult:
     else:
         lines.append(f"Embedding model: OK {settings.ollama_embedding_model}")
 
+    if settings.allow_web_search:
+        if settings.tavily_api_key:
+            lines.append("Tavily web search: OK configured")
+        else:
+            lines.append("Tavily web search: MISSING TAVILY_API_KEY")
+            missing.append("Set TAVILY_API_KEY in .env or set ALLOW_WEB_SEARCH=false")
+    else:
+        lines.append("Tavily web search: disabled")
+
     return CheckResult(ok=not missing, lines=lines, missing_commands=missing)

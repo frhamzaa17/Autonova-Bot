@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 import time
 from pathlib import Path
 from typing import Any
 
 import requests
 
-from .assistant import Assistant
+from .assistant import Assistant, wants_knowledge_ingest
 from .config import ALLOWED_USER_IDS, TELEGRAM_TOKEN, UPLOAD_DIR, ensure_directories
 from .storage import append_log
 from .transcription import transcribe_voice
@@ -19,6 +20,7 @@ class TelegramBot:
         self.token = token
         self.api = f"https://api.telegram.org/bot{token}"
         self.assistant = Assistant()
+        self.last_upload_modes: dict[int, tuple[str, datetime]] = {}
 
     def request(self, method: str, **payload: Any) -> dict:
         response = requests.post(f"{self.api}/{method}", json=payload, timeout=30)
@@ -56,6 +58,12 @@ class TelegramBot:
     def allowed(self, user_id: int) -> bool:
         return not ALLOWED_USER_IDS or str(user_id) in ALLOWED_USER_IDS
 
+    def recent_upload_mode(self, chat_id: int) -> str | None:
+        mode, updated_at = self.last_upload_modes.get(chat_id, ("", datetime.min))
+        if datetime.now() - updated_at <= timedelta(minutes=10):
+            return mode
+        return None
+
     def handle_update(self, update: dict) -> None:
         message = update.get("message") or update.get("edited_message") or {}
         chat = message.get("chat", {})
@@ -73,6 +81,10 @@ class TelegramBot:
         if "document" in message:
             doc = message["document"]
             attachment = self.download_file(doc["file_id"], doc.get("file_name", "upload.bin"))
+            if text and wants_knowledge_ingest(text):
+                self.last_upload_modes[chat_id] = ("knowledge", datetime.now())
+            elif not text and self.recent_upload_mode(chat_id) == "knowledge":
+                text = "save this document in knowledge base"
         elif "voice" in message:
             voice = message["voice"]
             attachment = self.download_file(voice["file_id"], f"voice_{voice['file_unique_id']}.ogg")

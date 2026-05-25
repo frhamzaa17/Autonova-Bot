@@ -26,6 +26,10 @@ class Settings:
     image_backend: str
     stable_diffusion_model: str
     allow_image_external_fallback: bool
+    tavily_api_key: str
+    tavily_search_depth: str
+    tavily_max_results: int
+    allow_web_search: bool
 
 
 def _user_ids(value: str) -> set[int]:
@@ -37,8 +41,28 @@ def _user_ids(value: str) -> set[int]:
     return ids
 
 
+def safe_workspace_id(value: str | None) -> str:
+    if not value:
+        return "default"
+    safe = "".join(char if char.isalnum() or char in {"_", "-"} else "_" for char in value.strip().lower())
+    safe = "_".join(part for part in safe.split("_") if part)
+    return safe or "default"
+
+
+def tenant_uploads_dir(settings: "Settings", tenant_id: str | None) -> Path:
+    path = settings.uploads_dir / safe_workspace_id(tenant_id)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def tenant_generated_dir(settings: "Settings", tenant_id: str | None) -> Path:
+    path = settings.generated_dir / safe_workspace_id(tenant_id)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def load_settings() -> Settings:
-    load_dotenv(BASE_DIR / ".env")
+    load_dotenv(BASE_DIR / ".env", override=True, encoding="utf-8-sig")
     settings = Settings(
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", ""),
         allowed_telegram_user_ids=_user_ids(os.getenv("ALLOWED_TELEGRAM_USER_IDS", "")),
@@ -55,6 +79,10 @@ def load_settings() -> Settings:
         stable_diffusion_model=os.getenv("STABLE_DIFFUSION_MODEL", ""),
         allow_image_external_fallback=os.getenv("ALLOW_IMAGE_EXTERNAL_FALLBACK", "false").lower()
         in {"1", "true", "yes"},
+        tavily_api_key=os.getenv("TAVILY_API_KEY", ""),
+        tavily_search_depth=os.getenv("TAVILY_SEARCH_DEPTH", "basic"),
+        tavily_max_results=int(os.getenv("TAVILY_MAX_RESULTS", "5")),
+        allow_web_search=os.getenv("ALLOW_WEB_SEARCH", "false").lower() in {"1", "true", "yes"},
     )
     for directory in (
         settings.data_dir,

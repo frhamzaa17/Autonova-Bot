@@ -130,6 +130,46 @@ def summarize_text_file(path: Path) -> str:
     return compact[:1000] + ("..." if len(compact) > 1000 else "")
 
 
+def extract_document_text(path: Path, max_chars: int = 12000) -> str:
+    suffix = path.suffix.lower()
+    if suffix in {".txt", ".md", ".csv"}:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    elif suffix == ".pdf":
+        try:
+            from pypdf import PdfReader
+        except ImportError as exc:
+            raise RuntimeError("Install dependencies with `pip install -r requirements.txt` to read PDF uploads.") from exc
+
+        reader = PdfReader(path)
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    elif suffix == ".docx":
+        try:
+            import docx2txt
+        except ImportError as exc:
+            raise RuntimeError("Install dependencies with `pip install -r requirements.txt` to read DOCX uploads.") from exc
+
+        text = docx2txt.process(str(path)) or ""
+    elif suffix == ".xlsx":
+        try:
+            from openpyxl import load_workbook
+        except ImportError as exc:
+            raise RuntimeError("Install dependencies with `pip install -r requirements.txt` to read XLSX uploads.") from exc
+
+        workbook = load_workbook(path, data_only=False)
+        rows = []
+        for sheet in workbook.worksheets:
+            rows.append(f"Sheet: {sheet.title}")
+            for row in sheet.iter_rows(values_only=True):
+                values = [str(value) for value in row if value is not None]
+                if values:
+                    rows.append(" | ".join(values))
+        text = "\n".join(rows)
+    else:
+        return ""
+    compact = re.sub(r"\s+", " ", text).strip()
+    return compact[:max_chars]
+
+
 def edit_csv(path: Path, instruction: str) -> Path:
     rows = []
     with path.open("r", encoding="utf-8-sig", newline="") as handle:

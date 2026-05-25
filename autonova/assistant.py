@@ -6,7 +6,8 @@ import re
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from .document_ops import draft_docx, draft_pdf, draft_text_document, edit_csv, edit_xlsx, summarize_text_file
+from docs.document_actions import perform_document_action
+from .document_ops import draft_docx, draft_pdf, draft_text_document, edit_csv, edit_xlsx, extract_document_text, summarize_text_file
 from .knowledge_base import KnowledgeBase
 from .llm import generate_with_ollama
 from .storage import add_task, append_log
@@ -22,6 +23,45 @@ OPS = {
     ast.Pow: operator.pow,
     ast.USub: operator.neg,
 }
+
+INGEST_WORDS = (
+    "ingest",
+    "learn",
+    "remember",
+    "knowledge",
+    "kb",
+    "store",
+    "save this",
+    "save these",
+    "save them",
+    "business details",
+    "company details",
+)
+
+EDIT_WORDS = (
+    "edit",
+    "rewrite",
+    "revise",
+    "update",
+    "replace",
+    "change",
+    "modify",
+    "correct",
+    "fill",
+    "set ",
+    "formula",
+    "mark ",
+)
+
+
+def wants_knowledge_ingest(message: str) -> bool:
+    lower = message.lower()
+    return any(word in lower for word in INGEST_WORDS)
+
+
+def wants_document_edit(message: str) -> bool:
+    lower = message.lower()
+    return any(word in lower for word in EDIT_WORDS)
 
 
 def _eval_math(node):
@@ -64,6 +104,10 @@ class Assistant:
 
         if attachment:
             return self._handle_attachment(message, attachment)
+
+        document_action = perform_document_action(message, {}, "autonova_phase1")
+        if document_action:
+            return {"text": document_action.summary, "files": document_action.files}
 
         if lower.startswith(("add kb", "remember:")):
             content = re.sub(r"^(add kb|remember:)\s*", "", message, flags=re.I).strip()
@@ -109,6 +153,14 @@ class Assistant:
 
     def _handle_attachment(self, message: str, attachment: Path) -> dict:
         suffix = attachment.suffix.lower()
+        if wants_knowledge_ingest(message) or not wants_document_edit(message):
+            content = extract_document_text(attachment)
+            if not content and suffix in {".txt", ".md"}:
+                content = summarize_text_file(attachment)
+            if not content:
+                return {"text": f"Received {attachment.name}, but I could not extract readable text for the knowledge base.", "files": []}
+            entry = self.kb.add("document", attachment.name, content, ["upload"])
+            return {"text": f"Saved {attachment.name} to knowledge base as {entry['id']}.", "files": []}
         if suffix in {".txt", ".md"}:
             summary = summarize_text_file(attachment)
             entry = self.kb.add("document", attachment.name, summary, ["upload"])
