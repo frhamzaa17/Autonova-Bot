@@ -22,6 +22,7 @@ class Settings:
     chroma_dir: Path
     uploads_dir: Path
     generated_dir: Path
+    structured_dir: Path
     whisper_model: str
     image_backend: str
     stable_diffusion_model: str
@@ -74,6 +75,7 @@ def load_settings() -> Settings:
         chroma_dir=BASE_DIR / os.getenv("CHROMA_DIR", "workspace/chroma"),
         uploads_dir=BASE_DIR / os.getenv("UPLOADS_DIR", "workspace/uploads"),
         generated_dir=BASE_DIR / os.getenv("GENERATED_DIR", "workspace/generated"),
+        structured_dir=BASE_DIR / os.getenv("STRUCTURED_DIR", "workspace/structured"),
         whisper_model=os.getenv("WHISPER_MODEL", "base"),
         image_backend=os.getenv("IMAGE_BACKEND", "auto"),
         stable_diffusion_model=os.getenv("STABLE_DIFFUSION_MODEL", ""),
@@ -89,6 +91,7 @@ def load_settings() -> Settings:
         settings.chroma_dir,
         settings.uploads_dir,
         settings.generated_dir,
+        settings.structured_dir,
     ):
         directory.mkdir(parents=True, exist_ok=True)
     return settings

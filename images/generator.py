@@ -6,7 +6,7 @@ from urllib.parse import quote
 
 import requests
 
-from utils.config import load_settings
+from utils.config import load_settings, tenant_generated_dir
 
 
 def _safe_name(prompt: str) -> str:
@@ -14,7 +14,12 @@ def _safe_name(prompt: str) -> str:
     return safe or "generated_image"
 
 
-def _stable_diffusion(prompt: str) -> Path | None:
+def _output_dir(tenant_id: str | None = None) -> Path:
+    settings = load_settings()
+    return tenant_generated_dir(settings, tenant_id) if tenant_id else settings.generated_dir
+
+
+def _stable_diffusion(prompt: str, tenant_id: str | None = None) -> Path | None:
     settings = load_settings()
     if not settings.stable_diffusion_model:
         return None
@@ -28,14 +33,14 @@ def _stable_diffusion(prompt: str) -> Path | None:
     pipe = StableDiffusionPipeline.from_pretrained(settings.stable_diffusion_model)
     pipe = pipe.to(device)
     image = pipe(prompt).images[0]
-    output = settings.generated_dir / f"{_safe_name(prompt)}.png"
+    output = _output_dir(tenant_id) / f"{_safe_name(prompt)}.png"
     image.save(output)
     return output
 
 
-def generate_image(prompt: str) -> Path | str:
+def generate_image(prompt: str, tenant_id: str | None = None) -> Path | str:
     settings = load_settings()
-    local_image = _stable_diffusion(prompt)
+    local_image = _stable_diffusion(prompt, tenant_id)
     if local_image:
         return local_image
 
@@ -48,6 +53,6 @@ def generate_image(prompt: str) -> Path | str:
     url = f"https://image.pollinations.ai/prompt/{quote(prompt)}"
     response = requests.get(url, timeout=90)
     response.raise_for_status()
-    output = settings.generated_dir / f"{_safe_name(prompt)}.jpg"
+    output = _output_dir(tenant_id) / f"{_safe_name(prompt)}.jpg"
     output.write_bytes(response.content)
     return output

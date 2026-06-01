@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AutoNova Dashboard</title>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    :root {
+      --bg:#f3f6f8; --panel:#fff; --ink:#15212b; --muted:#647482; --line:#dbe4ea;
+      --nav:#10252b; --nav2:#1e3a40; --accent:#087f70; --accent2:#e7f5f2;
+      --gold:#d99a32; --danger:#b83d49; --good:#14804a; --shadow:0 14px 34px rgba(18,38,48,.08);
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); background:linear-gradient(135deg,#edf4f6,#f8fafb); font-family:Inter,Segoe UI,Arial,sans-serif; font-size:14px; }
+    button,input,select { font:inherit; } button { cursor:pointer; }
+    .auth { min-height:100vh; display:grid; place-items:center; padding:24px; }
+    .auth-card { width:min(980px,100%); display:grid; grid-template-columns:1fr 1fr; background:var(--panel); border:1px solid var(--line); border-radius:18px; box-shadow:var(--shadow); overflow:hidden; }
+    .auth-hero { background:radial-gradient(circle at top left,#1f5d62,#10252b 58%); color:#fff; padding:42px; display:grid; align-content:space-between; gap:28px; min-height:570px; }
+    .brand { display:flex; align-items:center; gap:12px; }
+    .brand-mark { width:40px; height:40px; display:grid; place-items:center; border-radius:10px; background:var(--gold); color:#10252b; font-weight:900; }
+    .auth-hero h1 { margin:0; font-size:34px; letter-spacing:-.04em; }
+    .auth-hero p { color:#c7dcdf; line-height:1.6; max-width:410px; }
+    .hero-points { display:grid; gap:10px; color:#dcebec; }
+    .hero-points span { display:flex; gap:9px; align-items:center; }
+    .auth-forms { padding:28px; display:grid; align-content:center; gap:18px; }
+    .switch { display:flex; padding:4px; background:#eef3f5; border:1px solid var(--line); border-radius:10px; }
+    .switch button { flex:1; border:0; border-radius:8px; padding:10px; background:transparent; color:var(--muted); font-weight:800; }
+    .switch button.active { background:#fff; color:var(--ink); box-shadow:0 2px 7px rgba(0,0,0,.08); }
+    form { display:grid; gap:11px; }
+    label { display:grid; gap:6px; color:#44535e; font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; }
+    input,select { width:100%; min-height:40px; border:1px solid var(--line); border-radius:8px; padding:0 11px; background:#fff; color:var(--ink); }
+    .primary,.secondary,.ghost { min-height:39px; border-radius:8px; padding:0 13px; font-weight:800; display:inline-flex; align-items:center; justify-content:center; gap:8px; }
+    .primary { border:1px solid var(--accent); background:var(--accent); color:#fff; }
+    .secondary { border:1px solid var(--line); background:#fff; color:var(--ink); }
+    .ghost { border:0; background:transparent; color:var(--muted); }
+    .app { min-height:100vh; display:grid; grid-template-columns:250px minmax(0,1fr); }
+    aside { background:var(--nav); color:#e9f2f2; padding:20px 14px; display:flex; flex-direction:column; gap:22px; }
+    aside nav { display:grid; gap:5px; }
+    aside nav button { border:0; background:transparent; color:#c6d5d7; padding:11px; border-radius:8px; display:flex; gap:10px; align-items:center; text-align:left; }
+    aside nav button:hover,aside nav button.active { color:#fff; background:var(--nav2); }
+    .side-card { margin-top:auto; border:1px solid #355056; border-radius:12px; padding:13px; color:#b9cacc; line-height:1.5; font-size:12px; }
+    main { min-width:0; }
+    header { min-height:72px; padding:15px 24px; background:rgba(255,255,255,.92); backdrop-filter:blur(10px); border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:16px; }
+    .title h1 { margin:0; font-size:22px; letter-spacing:-.02em; }
+    .title p { margin:3px 0 0; color:var(--muted); font-size:12px; }
+    .toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+    .content { padding:22px 24px 32px; display:grid; gap:16px; }
+    .stats { display:grid; grid-template-columns:repeat(4,minmax(140px,1fr)); gap:12px; }
+    .stat,.panel { background:var(--panel); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow); }
+    .stat { padding:16px; min-height:108px; display:grid; align-content:space-between; }
+    .stat-top { display:flex; justify-content:space-between; color:var(--muted); font-size:12px; }
+    svg { width:17px; height:17px; } .stat-top svg { color:var(--accent); }
+    .stat strong { font-size:29px; letter-spacing:-.04em; }
+    .grid { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(300px,.8fr); gap:16px; align-items:start; }
+    .panel-head { padding:15px 16px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:12px; align-items:center; }
+    .panel-head h2 { margin:0; font-size:16px; } .panel-head span { color:var(--muted); font-size:12px; }
+    .chart { height:235px; padding:18px 16px 10px; display:flex; gap:12px; align-items:end; }
+    .chart-col { height:100%; flex:1; display:grid; grid-template-rows:1fr auto; gap:8px; min-width:0; }
+    .bars { display:flex; justify-content:center; gap:4px; align-items:end; min-height:0; border-bottom:1px solid var(--line); }
+    .bar { width:9px; min-height:3px; border-radius:4px 4px 0 0; }
+    .query { background:var(--accent); } .edit { background:#e8a33e; } .image { background:#5676a8; }
+    .date { color:var(--muted); font-size:11px; text-align:center; }
+    .legend { display:flex; gap:14px; padding:0 16px 15px; color:var(--muted); font-size:11px; }
+    .legend i { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:5px; }
+    .doc-tools { padding:13px 16px; display:flex; gap:8px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+    .upload { position:relative; overflow:hidden; } .upload input { position:absolute; inset:0; opacity:0; cursor:pointer; }
+    .table-wrap { overflow:auto; max-height:370px; }
+    table { width:100%; border-collapse:collapse; font-size:12px; }
+    th,td { padding:11px 12px; border-bottom:1px solid #edf1f3; text-align:left; vertical-align:middle; white-space:nowrap; }
+    th { color:var(--muted); font-size:11px; text-transform:uppercase; background:#fafbfc; position:sticky; top:0; }
+    td.name { max-width:260px; overflow:hidden; text-overflow:ellipsis; font-weight:800; }
+    .workspace-link { border:0; background:transparent; padding:0; color:var(--ink); font-weight:900; cursor:pointer; }
+    .workspace-link:hover { color:var(--accent); }
+    .icon-button { width:32px; height:32px; display:grid; place-items:center; border:0; border-radius:7px; background:transparent; color:var(--muted); }
+    .icon-button:hover { background:#f1f4f5; color:var(--danger); }
+    .activity { max-height:430px; overflow:auto; }
+    .activity-item,.integration,.step { padding:12px 16px; border-bottom:1px solid #edf1f3; }
+    .activity-meta { display:flex; gap:7px; align-items:center; color:var(--muted); font-size:11px; margin-bottom:6px; }
+    .badge { padding:2px 7px; border-radius:999px; background:var(--accent2); color:var(--accent); font-weight:800; }
+    .activity-item p { margin:0; line-height:1.45; color:#3b4951; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+    .link-box { margin:14px 16px; padding:13px; border:1px solid #b9ded7; border-radius:11px; background:var(--accent2); display:grid; gap:8px; }
+    .link-code { font-family:Consolas,monospace; background:#fff; border:1px dashed #9bcfc6; border-radius:8px; padding:10px; color:#084d45; font-weight:800; overflow:auto; }
+    .dot { width:9px; height:9px; border-radius:50%; background:var(--gold); flex:0 0 auto; }
+    .dot.healthy,.dot.configured,.dot.active { background:var(--good); } .dot.offline,.dot.missing { background:var(--danger); }
+    .integration { display:flex; gap:10px; align-items:center; } .integration small,.step small,td small { color:var(--muted); }
+    .step { display:flex; gap:11px; align-items:flex-start; } .step-index { width:25px; height:25px; border-radius:50%; display:grid; place-items:center; background:#eef3f5; color:var(--muted); font-weight:900; }
+    .step.done .step-index { background:var(--accent); color:#fff; }
+    .empty { padding:30px 16px; text-align:center; color:var(--muted); }
+    .toast { position:fixed; right:18px; bottom:18px; max-width:380px; padding:12px 14px; border-radius:9px; background:#193035; color:#fff; box-shadow:var(--shadow); display:none; z-index:10; }
+    .toast.show { display:block; }
+    .hidden { display:none !important; }
+    @media (max-width:980px) { .auth-card,.grid { grid-template-columns:1fr; } .auth-hero { min-height:auto; } }
+    @media (max-width:760px) {
+      .app { grid-template-columns:1fr; } aside { padding:10px; gap:8px; } aside nav { grid-template-columns:repeat(4,1fr); } aside nav button { justify-content:center; font-size:0; } .side-card { display:none; }
+      header { align-items:flex-start; flex-direction:column; padding:13px 15px; } .toolbar { justify-content:flex-start; } .content { padding:15px; } .stats { grid-template-columns:repeat(2,minmax(120px,1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <section class="auth" id="auth">
+    <div class="auth-card">
+      <div class="auth-hero">
+        <div class="brand"><div class="brand-mark">A</div><div><b>AutoNova</b><br><small>Secure company dashboard</small></div></div>
+        <div>
+          <h1>Run each company in its own workspace.</h1>
+          <p>Users only see their registered company dashboard and documents. Admins can monitor operations, registrations, and system health.</p>
+        </div>
+        <div class="hero-points">
+          <span><i data-lucide="shield-check"></i> Server-side role and workspace enforcement</span>
+          <span><i data-lucide="building-2"></i> Company registration and onboarding flow</span>
+          <span><i data-lucide="files"></i> Private document management per workspace</span>
+        </div>
+      </div>
+      <div class="auth-forms">
+        <div class="switch"><button id="loginTab" class="active" onclick="showAuth('login')">Login</button><button id="registerTab" onclick="showAuth('register')">Register Company</button></div>
+        <form id="loginForm">
+          <label>Email or Admin Username<input id="loginUser" autocomplete="username" required></label>
+          <label>Password<input id="loginPassword" type="password" autocomplete="current-password" required></label>
+          <button class="primary" type="submit"><i data-lucide="log-in"></i>Login</button>
+        </form>
+        <form id="registerForm" class="hidden">
+          <label>Company Name<input id="companyName" required></label>
+          <label>Contact Person<input id="contactName"></label>
+          <label>Email<input id="registerEmail" type="email" autocomplete="username" required></label>
+          <label>Password<input id="registerPassword" type="password" autocomplete="new-password" minlength="8" required></label>
+          <button class="primary" type="submit"><i data-lucide="building-2"></i>Create Company Workspace</button>
+          <small style="color:var(--muted)">Your workspace is created immediately and remains isolated from admin/system data.</small>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <section class="app hidden" id="app">
+    <aside>
+      <div class="brand"><div class="brand-mark">A</div><div><b>AutoNova</b><br><small id="roleLabel">Dashboard</small></div></div>
+      <nav>
+        <button class="active" onclick="scrollToTop()"><i data-lucide="layout-dashboard"></i><span>Overview</span></button>
+        <button onclick="focusPanel('documentsPanel')"><i data-lucide="files"></i><span>Documents</span></button>
+        <button onclick="focusPanel('activityPanel')"><i data-lucide="messages-square"></i><span>Activity</span></button>
+        <button id="adminNav" onclick="focusPanel('adminPanel')"><i data-lucide="shield"></i><span>Admin</span></button>
+      </nav>
+      <div class="side-card" id="sideNote">Workspace data is isolated for this login.</div>
+    </aside>
+    <main>
+      <header>
+        <div class="title"><h1 id="pageTitle">Workspace Overview</h1><p id="pageSubtitle">Assistant operations and company knowledge</p></div>
+        <div class="toolbar">
+          <select id="workspace" aria-label="Workspace"></select>
+          <button class="secondary" onclick="loadOverview()"><i data-lucide="refresh-cw"></i>Refresh</button>
+          <button class="ghost" onclick="logout()"><i data-lucide="log-out"></i>Logout</button>
+        </div>
+      </header>
+      <div class="content">
+        <section class="stats">
+          <article class="stat"><div class="stat-top"><span>Queries Handled</span><i data-lucide="message-circle-question"></i></div><strong id="queries">0</strong></article>
+          <article class="stat"><div class="stat-top"><span>Knowledge Documents</span><i data-lucide="file-stack"></i></div><strong id="documents">0</strong></article>
+          <article class="stat"><div class="stat-top"><span>Document Edits</span><i data-lucide="file-pen-line"></i></div><strong id="edits">0</strong></article>
+          <article class="stat"><div class="stat-top"><span>Image Generations</span><i data-lucide="image"></i></div><strong id="images">0</strong></article>
+        </section>
+        <section class="grid">
+          <article class="panel">
+            <div class="panel-head"><div><h2>7-Day Activity</h2><span>Queries, edits, and generated images</span></div></div>
+            <div class="chart" id="chart"></div>
+            <div class="legend"><span><i style="background:var(--accent)"></i>Queries</span><span><i style="background:#e8a33e"></i>Edits</span><span><i style="background:#5676a8"></i>Images</span></div>
+          </article>
+          <article class="panel" id="processPanel">
+            <div class="panel-head"><div><h2 id="processTitle">Company Process</h2><span id="processSub">Registration and onboarding progress</span></div></div>
+            <div id="processContent"></div>
+          </article>
+        </section>
+        <section class="grid">
+          <article class="panel" id="documentsPanel">
+            <div class="panel-head"><div><h2>Knowledge Base Manager</h2><span>Upload, download, or remove workspace documents</span></div></div>
+            <div class="doc-tools">
+              <label class="primary upload" id="uploadControl"><i data-lucide="upload"></i>Upload document<input id="fileInput" type="file" onchange="uploadDocument(this.files[0])"></label>
+              <button class="secondary hidden" id="backWorkspaceList" onclick="showWorkspaceList()"><i data-lucide="arrow-left"></i>Workspaces</button>
+              <button class="secondary" onclick="loadOverview()"><i data-lucide="refresh-cw"></i>Refresh</button>
+            </div>
+            <div class="table-wrap"><table><thead><tr><th>Item</th><th>Type</th><th>Records</th><th>Updated</th><th></th></tr></thead><tbody id="docRows"></tbody></table></div>
+          </article>
+          <article class="panel" id="activityPanel">
+            <div class="panel-head"><div><h2>Assistant Activity</h2><span>Recent workspace conversation events</span></div></div>
+            <div class="activity" id="activity"></div>
+          </article>
+        </section>
+        <section class="grid hidden" id="adminPanel">
+          <article class="panel">
+            <div class="panel-head"><div><h2>Company Registrations</h2><span>Registered user workspaces</span></div></div>
+            <div class="table-wrap"><table><thead><tr><th>Company</th><th>User</th><th>Workspace</th><th>Status</th></tr></thead><tbody id="registrationRows"></tbody></table></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><h2>Integration Status</h2><span>Runtime configuration and health</span></div></div>
+            <div id="integrations"></div>
+          </article>
+        </section>
+      </div>
+    </main>
+  </section>
+  <div class="toast" id="toast"></div>
+  <script>
+    let overview = {};
+    let sessionUser = null;
+    const workspace = document.getElementById('workspace');
+    workspace.addEventListener('change', loadOverview);
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
+    }
+    function formatBytes(value) {
+      if (!value) return '0 KB';
+      return value < 1048576 ? `${Math.ceil(value / 1024)} KB` : `${(value / 1048576).toFixed(1)} MB`;
+    }
+    function toast(message) {
+      const box = document.getElementById('toast'); box.textContent = message; box.classList.add('show');
+      setTimeout(() => box.classList.remove('show'), 3600);
+    }
+    function showAuth(mode) {
+      document.getElementById('loginForm').classList.toggle('hidden', mode !== 'login');
+      document.getElementById('registerForm').classList.toggle('hidden', mode !== 'register');
+      document.getElementById('loginTab').classList.toggle('active', mode === 'login');
+      document.getElementById('registerTab').classList.toggle('active', mode === 'register');
+    }
+    async function postJSON(url, payload = {}) {
+      const response = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Request failed');
+      return data;
+    }
+    document.getElementById('loginForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      try {
+        const data = await postJSON('/api/login', {username:loginUser.value, password:loginPassword.value});
+        sessionUser = data.user; await loadOverview(true);
+      } catch (error) { toast(error.message); }
+    });
+    document.getElementById('registerForm').addEventListener('submit', async event => {
+      event.preventDefault();
+      try {
+        await postJSON('/api/register', {company_name:companyName.value, contact_name:contactName.value, email:registerEmail.value, password:registerPassword.value});
+        toast('Company workspace created. Please login with your email.');
+        showAuth('login'); loginUser.value = registerEmail.value; loginPassword.value = '';
+      } catch (error) { toast(error.message); }
+    });
+    async function checkSession() {
+      const response = await fetch('/api/session');
+      const data = await response.json();
+      if (data.authenticated) { sessionUser = data.user; await loadOverview(true); }
+      else showLogin();
+    }
+    function showLogin() {
+      document.getElementById('auth').classList.remove('hidden');
+      document.getElementById('app').classList.add('hidden');
+      lucide.createIcons();
+    }
+    function showApp() {
+      document.getElementById('auth').classList.add('hidden');
+      document.getElementById('app').classList.remove('hidden');
+    }
+    async function logout() {
+      await fetch('/api/logout', {method:'POST'});
+      sessionUser = null; overview = {}; showLogin();
+    }
+    async function loadOverview(forceDefault = false) {
+      const selected = forceDefault ? (sessionUser?.role === 'admin' ? 'all' : '') : (workspace.value || '');
+      const response = await fetch(`/api/overview?workspace=${encodeURIComponent(selected)}`);
+      if (response.status === 401) return showLogin();
+      overview = await response.json();
+      sessionUser = overview.user;
+      workspace.innerHTML = (overview.workspaces || []).map(item => `<option value="${escapeHtml(item)}">${item === 'all' ? 'ALL' : escapeHtml(item)}</option>`).join('');
+      workspace.value = overview.workspace;
+      showApp(); render();
+    }
+    function render() {
+      const isAdmin = overview.role === 'admin';
+      document.getElementById('roleLabel').textContent = isAdmin ? 'Admin dashboard' : 'User dashboard';
+      document.getElementById('pageTitle').textContent = isAdmin ? 'Admin Operations Overview' : `${overview.user.company_name || 'Company'} Dashboard`;
+      document.getElementById('pageSubtitle').textContent = isAdmin ? 'Cross-workspace monitoring and registrations' : `Workspace: ${overview.workspace}`;
+      document.getElementById('adminPanel').classList.toggle('hidden', !isAdmin);
+      document.getElementById('adminNav').classList.toggle('hidden', !isAdmin);
+      workspace.classList.toggle('hidden', !isAdmin);
+      workspace.disabled = !isAdmin;
+      document.getElementById('uploadControl').classList.toggle('hidden', isAdmin && overview.workspace === 'all');
+      document.getElementById('backWorkspaceList').classList.toggle('hidden', !(isAdmin && overview.workspace !== 'all'));
+      document.getElementById('sideNote').textContent = isAdmin ? 'Admin can inspect registered workspaces and system health.' : 'This login is locked to its own company workspace.';
+      Object.entries(overview.stats || {}).forEach(([key, value]) => { const node = document.getElementById(key); if (node) node.textContent = value; });
+      renderChart(); renderProcess(); renderDocumentsV2(); renderActivity(); renderAdmin(); lucide.createIcons();
+    }
+    function renderChart() {
+      const items = overview.analytics || []; const max = Math.max(1, ...items.flatMap(item => [item.queries, item.edits, item.images]));
+      document.getElementById('chart').innerHTML = items.map(item => `<div class="chart-col"><div class="bars">
+        <i class="bar query" title="${item.queries} queries" style="height:${Math.max(3,item.queries/max*100)}%"></i>
+        <i class="bar edit" title="${item.edits} edits" style="height:${Math.max(3,item.edits/max*100)}%"></i>
+        <i class="bar image" title="${item.images} images" style="height:${Math.max(3,item.images/max*100)}%"></i>
+      </div><div class="date">${escapeHtml(String(item.date).slice(5))}</div></div>`).join('');
+    }
+    function renderProcess() {
+      const user = overview.user || {}; const onboarding = overview.onboarding || {}; const step = Number(onboarding.step || 1);
+      const steps = onboarding.steps || [];
+      document.getElementById('processTitle').textContent = overview.role === 'admin' ? 'Admin Controls' : 'Company Process';
+      document.getElementById('processSub').textContent = overview.role === 'admin' ? 'Operational review path' : `${user.company_name || 'Company'} onboarding`;
+      const telegramLink = overview.role === 'user' ? `<div class="link-box">
+        <b>Telegram Bot Access</b>
+        <small>Send this command to the AutoNova Telegram bot to use the same company workspace:</small>
+        <div class="link-code">/link ${escapeHtml(user.telegram_link_code || '')}</div>
+        <small>${user.telegram_linked ? 'Telegram is linked to this company account.' : 'Not linked yet.'}</small>
+      </div>` : '';
+      document.getElementById('processContent').innerHTML = telegramLink + steps.map((label, index) => `<div class="step ${index + 1 <= step ? 'done' : ''}">
+        <div class="step-index">${index + 1}</div><div><b>${escapeHtml(label)}</b><br><small>${index + 1 <= step ? 'In progress or complete' : 'Pending'}</small></div>
+      </div>`).join('');
+    }
+    function renderDocuments() {
+      const docs = overview.documents || [];
+      document.getElementById('docRows').innerHTML = docs.length ? docs.map(doc => {
+        const ws = doc.workspace || overview.workspace;
+        return `<tr><td class="name" title="${escapeHtml(doc.name)}">${escapeHtml(doc.name)}<br><small>${formatBytes(doc.size)}${doc.workspace ? ` · ${escapeHtml(doc.workspace)}` : ''}</small></td>
+          <td>${escapeHtml(doc.type)}</td><td>${doc.records}</td><td>${escapeHtml((doc.updated_at || '').replace('T',' '))}</td><td>
+          <div style="display:flex"><a class="icon-button" title="Download document" href="/api/document?workspace=${encodeURIComponent(ws)}&name=${encodeURIComponent(doc.name)}"><i data-lucide="download"></i></a>
+          <button class="icon-button" title="Remove document" onclick="removeDocument('${encodeURIComponent(ws)}','${encodeURIComponent(doc.name)}')"><i data-lucide="trash-2"></i></button></div></td></tr>`;
+      }).join('') : '<tr><td colspan="5"><div class="empty">No knowledge documents in this workspace yet.</div></td></tr>';
+    }
+    function renderDocumentsV2() {
+      if (overview.role === 'admin' && overview.workspace === 'all') {
+        renderWorkspaceDocumentsIndex();
+        return;
+      }
+      const groups = [
+        ['Uploaded', overview.documents || [], 'uploaded'],
+        ['Generated - Docs', overview.generated_documents || [], 'generated_document'],
+        ['Generated - Images', overview.generated_images || [], 'generated_image'],
+      ];
+      document.getElementById('docRows').innerHTML = groups.map(([label, docs, fallbackCategory]) => {
+        const heading = `<tr><th colspan="5">${label}</th></tr>`;
+        const rows = docs.length ? docs.map(doc => renderManagedFileRow(doc, fallbackCategory)).join('') : `<tr><td colspan="5"><div class="empty">No ${label.toLowerCase()} in this workspace yet.</div></td></tr>`;
+        return heading + rows;
+      }).join('');
+    }
+    function renderWorkspaceDocumentsIndex() {
+      const counts = {};
+      (overview.workspaces || []).filter(item => item !== 'all').forEach(ws => {
+        counts[ws] = {uploaded:0, docs:0, images:0};
+      });
+      (overview.documents || []).forEach(doc => {
+        const ws = doc.workspace || overview.workspace;
+        counts[ws] = counts[ws] || {uploaded:0, docs:0, images:0};
+        counts[ws].uploaded += 1;
+      });
+      (overview.generated_documents || []).forEach(doc => {
+        const ws = doc.workspace || overview.workspace;
+        counts[ws] = counts[ws] || {uploaded:0, docs:0, images:0};
+        counts[ws].docs += 1;
+      });
+      (overview.generated_images || []).forEach(doc => {
+        const ws = doc.workspace || overview.workspace;
+        counts[ws] = counts[ws] || {uploaded:0, docs:0, images:0};
+        counts[ws].images += 1;
+      });
+      const rows = Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)).map(([ws, item]) => {
+        const total = item.uploaded + item.docs + item.images;
+        return `<tr><td class="name"><button class="workspace-link" onclick="openWorkspaceDocuments('${encodeURIComponent(ws)}')">${escapeHtml(ws)}</button></td>
+          <td>Workspace</td><td>${total}</td><td><small>Uploaded ${item.uploaded} &middot; Docs ${item.docs} &middot; Images ${item.images}</small></td><td>
+          <button class="secondary" onclick="openWorkspaceDocuments('${encodeURIComponent(ws)}')"><i data-lucide="folder-open"></i>Open</button></td></tr>`;
+      }).join('');
+      document.getElementById('docRows').innerHTML = rows || '<tr><td colspan="5"><div class="empty">No workspaces found.</div></td></tr>';
+    }
+    function openWorkspaceDocuments(encodedWorkspace) {
+      workspace.value = decodeURIComponent(encodedWorkspace);
+      loadOverview();
+    }
+    function showWorkspaceList() {
+      workspace.value = 'all';
+      loadOverview();
+    }
+    function renderManagedFileRow(doc, fallbackCategory) {
+      const ws = doc.workspace || overview.workspace;
+      const category = doc.category || fallbackCategory || 'uploaded';
+      const records = category === 'generated_image' ? '-' : (doc.records || 0);
+      return `<tr><td class="name" title="${escapeHtml(doc.name)}">${escapeHtml(doc.name)}<br><small>${formatBytes(doc.size)}${doc.workspace ? ` &middot; ${escapeHtml(doc.workspace)}` : ''}</small></td>
+        <td>${escapeHtml(doc.type)}</td><td>${records}</td><td>${escapeHtml((doc.updated_at || '').replace('T',' '))}</td><td>
+        <div style="display:flex"><a class="icon-button" title="Download" href="/api/document?workspace=${encodeURIComponent(ws)}&category=${encodeURIComponent(category)}&name=${encodeURIComponent(doc.name)}"><i data-lucide="download"></i></a>
+        <button class="icon-button" title="Remove" onclick="removeDocument('${encodeURIComponent(ws)}','${encodeURIComponent(doc.name)}','${encodeURIComponent(category)}')"><i data-lucide="trash-2"></i></button></div></td></tr>`;
+    }
+    function renderActivity() {
+      const items = overview.activities || [];
+      document.getElementById('activity').innerHTML = items.length ? items.map(item => `<div class="activity-item"><div class="activity-meta">
+        <span class="badge">${escapeHtml(item.role)}</span><span>${escapeHtml(item.workspace)}</span><span>${escapeHtml((item.timestamp || '').replace('T',' '))}</span>
+      </div><p>${escapeHtml(item.content)}</p></div>`).join('') : '<div class="empty">No assistant activity recorded yet.</div>';
+    }
+    function renderAdmin() {
+      if (overview.role !== 'admin') return;
+      document.getElementById('registrationRows').innerHTML = (overview.registrations || []).length ? overview.registrations.map(user => `<tr>
+        <td class="name">${escapeHtml(user.company_name)}<br><small>${escapeHtml(user.email)}</small></td><td>${escapeHtml(user.contact_name || user.username)}</td>
+        <td>${escapeHtml(user.workspace)}</td><td><span class="badge">${escapeHtml(user.status)}</span></td>
+      </tr>`).join('') : '<tr><td colspan="4"><div class="empty">No company registrations yet.</div></td></tr>';
+      document.getElementById('integrations').innerHTML = (overview.integrations || []).map(item => `<div class="integration">
+        <i class="dot ${escapeHtml(item.status)}"></i><div><b>${escapeHtml(item.name)}</b><br><small>${escapeHtml(item.status)} · ${escapeHtml(item.detail)}</small></div>
+      </div>`).join('');
+    }
+    async function uploadDocument(file) {
+      if (!file) return;
+      const ws = workspace.value;
+      if (ws === 'all') return toast('Choose a workspace before uploading.');
+      const form = new FormData(); form.append('file', file);
+      toast(`Uploading ${file.name}...`);
+      const response = await fetch(`/api/documents?workspace=${encodeURIComponent(ws)}`, {method:'POST', body:form});
+      const data = await response.json();
+      if (!response.ok) return toast(data.error || 'Upload failed');
+      toast(`${data.name} structured with ${data.records} records${data.ingest_error ? '; vector ingest needs attention' : ''}.`);
+      document.getElementById('fileInput').value = ''; loadOverview();
+    }
+    async function removeDocument(ws, name, category = 'uploaded') {
+      if (!confirm('Remove this item from this workspace knowledge base?')) return;
+      const response = await fetch(`/api/documents?workspace=${ws}&category=${category}&name=${name}`, {method:'DELETE'});
+      const data = await response.json(); toast(response.ok ? `${data.removed} removed.` : (data.error || 'Remove failed')); loadOverview();
+    }
+    function focusPanel(id) { document.getElementById(id).scrollIntoView({behavior:'smooth'}); }
+    function scrollToTop() { window.scrollTo({top:0, behavior:'smooth'}); }
+    checkSession();
+  </script>
+</body>
+</html>

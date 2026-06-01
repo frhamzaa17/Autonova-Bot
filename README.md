@@ -1,437 +1,390 @@
-# AutoNova Business Operations Assistant
+# AutoNova Bot
 
-AutoNova is a local-first Telegram business assistant for company operations. It combines local LLM responses, company knowledge retrieval, document ingestion, document generation/editing, spreadsheet operations, voice transcription, image generation, structured business calculations, and optional Tavily web search.
+AutoNova Bot is a local-first business operations assistant with a Telegram bot, a secure web dashboard, local document intelligence, document generation/editing, image generation, voice transcription, structured business querying, and optional web search.
 
-The project is intended to behave like an operations assistant for a business owner:
+The project is designed for company/workspace-based usage. Each company workspace keeps its own uploaded files, generated files, structured document JSON, vector knowledge, chat context, and dashboard view.
 
-- understand uploaded internal company documents
-- answer operational questions from company data
-- retrieve and reason over PDFs, DOCX, XLSX, TXT, and MD files
-- draft letters, agreements, proposals, reports, and other business documents
-- edit uploaded or previously generated documents
-- update business records where supported
-- return generated/edited files on Telegram
-- remember chat context and current workspace
-- optionally search or scrape the web for updated external information
+Current project status: active local prototype, suitable for demos, internal testing, and controlled business workflows. It is not yet a production multi-tenant SaaS system.
 
-## Current Status
+## What It Does
 
-This is an evolving local assistant, not a finished enterprise system. It now has several grounded paths for common business operations, but production use still needs stronger audit controls, database-backed state, richer table extraction, user permissions, and proper document-layout preservation.
+- Runs a Telegram assistant for business questions and file workflows.
+- Runs a browser dashboard for admin and company users.
+- Registers company accounts with isolated workspaces.
+- Links Telegram chats to registered dashboard companies with `/link CODE`.
+- Uploads and structures PDFs, DOCX, XLSX, TXT, MD, and OCR-supported images.
+- Answers questions from local company documents and structured records.
+- Drafts business documents as TXT, DOCX, and PDF bundles.
+- Edits uploaded or generated documents where supported.
+- Generates images and stores them inside the active company workspace.
+- Transcribes Telegram voice notes with Whisper.
+- Uses local Ollama models for chat and embeddings.
+- Uses ChromaDB for local vector retrieval.
+- Optionally uses Tavily for external/current web search.
+- Optionally uses Pollinations as an external image fallback.
 
-The active command entrypoint is:
+## Current State
+
+Active entrypoint:
 
 ```powershell
 python main.py
 ```
 
-The newer active bot is in:
+Active runtime modules:
+
+- Telegram bot: `bot/telegram_bot.py`
+- Dashboard backend: `dashboard/server.py`
+- Dashboard UI: `dashboard/static/index.html`
+- Retrieval and structured document logic: `rag/`
+- Document generation/editing: `docs/`
+- Runtime configuration/storage helpers: `utils/`
+
+Legacy reference implementation:
+
+- `autonova/`
+
+The `autonova/` package is older Phase 1 code kept for reference/compatibility. The current dashboard and bot use the top-level `bot/`, `dashboard/`, `rag/`, `docs/`, `images/`, `voice/`, and `utils/` packages.
+
+## Tech Stack
+
+- Python 3.10+, recommended Python 3.11
+- `python-telegram-bot` for Telegram integration
+- Ollama for local LLM chat
+- Ollama embeddings through `langchain-ollama`
+- ChromaDB through `langchain-chroma`
+- LangChain document loaders/text splitters
+- `python-docx` for DOCX creation/editing
+- `openpyxl` for XLSX reading/editing
+- `pypdf` for PDF text extraction
+- Local PDF writer helpers for generated PDFs
+- OpenAI Whisper package for local speech transcription
+- FFmpeg for Telegram voice conversion
+- Tesseract/Pytesseract and Pillow for OCR image handling
+- Built-in Python `http.server` for the dashboard backend
+- Plain HTML/CSS/JavaScript dashboard UI with Lucide icons
+- JSON files for local runtime state
+- Optional Tavily Search/Extract API for web search
+- Optional Pollinations fallback for image generation
+- Optional local Stable Diffusion model via `diffusers` if configured and installed separately
+
+## Workspace Model
+
+Workspace IDs are safe lowercase identifiers derived from company names, for example:
 
 ```text
-bot/telegram_bot.py
+CodSoft -> codsoft
+AFF -> aff
 ```
 
-The older Phase 1 implementation remains in:
+Workspace-scoped files are stored under:
 
 ```text
-autonova/
+workspace/uploads/<workspace>/
+workspace/generated/<workspace>/
+workspace/structured/<workspace>/documents.json
 ```
 
-It is kept for compatibility/reference and has partial support for the newer action layer.
+The dashboard no longer shows the internal `default` fallback workspace. Real dashboard workspaces come from registered companies, linked Telegram state, and actual workspace folders.
 
-## Major Capabilities
+## Dashboard
 
-### Telegram Assistant
+Run:
 
-- Handles text messages.
-- Handles voice notes through Whisper.
-- Handles uploaded files.
-- Sends generated documents, edited files, and images back to the user.
-- Maintains per-chat workspace state.
-- Supports `/company Your Company Name` to separate business workspaces.
+```powershell
+.\.venv\Scripts\python.exe main.py dashboard
+```
 
-### Company Knowledge Base
-
-Uploaded files can be ingested into a company-specific ChromaDB collection.
-
-Supported ingestion formats:
-
-- `.pdf`
-- `.docx`
-- `.xlsx`
-- `.txt`
-- `.md`
-
-The bot stores uploaded files under:
+Open:
 
 ```text
-workspace/uploads/
+http://127.0.0.1:8765
 ```
 
-Vector database files are stored under:
+If port `8765` is busy:
+
+```powershell
+.\.venv\Scripts\python.exe main.py dashboard --port 8766
+```
+
+### Admin Dashboard
+
+Admin login defaults to the `ALL` overview.
+
+Admin features:
+
+- Cross-workspace stats and activity.
+- Company registration list.
+- Integration status for Ollama, Telegram, Tavily, ChromaDB, OCR, and voice.
+- Workspace dropdown with `ALL` plus real workspaces only.
+- Knowledge Base Manager starts with workspace rows.
+- Clicking a workspace opens that workspace's files.
+- `Workspaces` button returns to the workspace list.
+- Inside a workspace, files are grouped as:
+  - Uploaded
+  - Generated - Docs
+  - Generated - Images
+
+Upload is hidden on `ALL` and only appears inside a selected workspace.
+
+### User Dashboard
+
+User dashboard is locked to that user's registered company workspace.
+
+User dashboard features:
+
+- Own company stats.
+- Own workspace activity.
+- Own knowledge base files.
+- Upload/download/remove documents for that workspace.
+- Telegram link command for connecting the Telegram bot.
+
+The workspace dropdown is hidden for users because users cannot switch workspaces.
+
+### First Admin Login
+
+Set these before first dashboard run:
+
+```text
+DASHBOARD_ADMIN_USERNAME=admin
+DASHBOARD_ADMIN_PASSWORD=choose-a-strong-password
+```
+
+If `DASHBOARD_ADMIN_PASSWORD` is empty, the dashboard creates a random bootstrap password and saves it here:
+
+```text
+data/dashboard_admin_bootstrap.txt
+```
+
+## Telegram Bot
+
+Run:
+
+```powershell
+.\.venv\Scripts\python.exe main.py bot
+```
+
+Telegram commands:
+
+```text
+/start
+/company Your Company Name
+/link DASHBOARD_CODE
+```
+
+Use `/link CODE` for dashboard-registered companies. The code appears in the user dashboard. Once linked, Telegram uploads, generated files, image generations, and questions use the same company workspace as the dashboard.
+
+Use `/company Company Name` only for local/non-dashboard workspaces. Dashboard-registered workspaces are protected from being claimed by unrelated Telegram users.
+
+## Main Features
+
+### Knowledge Base
+
+Supported upload/ingestion formats:
+
+- PDF
+- DOCX
+- XLSX
+- TXT
+- MD
+- JPG/JPEG/PNG/WEBP and other configured OCR image extensions
+
+Uploads are stored in:
+
+```text
+workspace/uploads/<workspace>/
+```
+
+Vector knowledge is stored in:
 
 ```text
 workspace/chroma/
 ```
 
-The assistant retrieves knowledge before answering business questions.
-
-### Document Upload Behavior
-
-The bot is designed to avoid accidental editing.
-
-If a document is uploaded with a caption like:
+Structured decoded knowledge is stored in:
 
 ```text
-save to knowledge base
-these are my business details, save them
-ingest this
-remember this document
+workspace/structured/<workspace>/documents.json
 ```
 
-the file is ingested into the knowledge base.
+### Structured Document Understanding
 
-If Telegram sends multiple uploaded files and only one file has the caption, the bot can inherit recent knowledge-ingest intent for the batch.
+Implemented in:
 
-Captionless document uploads are treated as knowledge documents by default, not as edit requests.
+```text
+rag/structured_store.py
+```
+
+The structured decoder extracts:
+
+- document profiles
+- headings and sections
+- paragraphs
+- key-value records
+- entity lines
+- dates and normalized ISO dates
+- money/amount values
+- IDs, emails, and phone-like values
+- bullets and list items
+- question/answer records
+- DOCX table rows
+- XLSX rows
+- inferred PDF/text table rows
+
+Specialized record logic currently supports stronger handling for:
+
+- question banks
+- rental agreements
+- renewal pipelines
+- rent trackers
+- property listings
+- client/contact data
+- spreadsheets
+- generic business/legal documents
+
+Structured answers are used before LLM fallback for counts, totals, filters, document details, agreement queries, question counts, rent logic, and similar deterministic operations.
 
 ### Document Generation
 
-The bot can draft business documents from natural language:
+Examples:
 
 ```text
-draft a rental agreement for Green Valley Residency
-prepare a sales proposal for buyer Rahul
-write a report on available inventory
-create a letter to the tenant for rent follow-up
+draft a rental agreement for 11 months
+prepare a sales proposal
+create a tenant follow-up letter
+make a report from this document
 ```
 
 Generated bundles can include:
 
-- TXT
-- DOCX
-- PDF
+- `.txt`
+- `.docx`
+- `.pdf`
 
-Generated files are saved under:
+Generated files are stored in:
 
 ```text
-workspace/generated/
+workspace/generated/<workspace>/
 ```
 
-### Generic Document Action Layer
+### Document Editing
 
-The project now includes a reusable document action router:
+Implemented mainly in:
 
 ```text
 docs/document_actions.py
+docs/document_ops.py
 ```
 
-It detects general action requests such as:
+Supported actions include:
 
 - update
 - edit
 - rewrite
 - revise
 - modify
-- change
+- replace
 - correct
 - fill
-- replace
-- mark
-- record
-- set
+- set cell values
+- add formulas
+- mark spreadsheet rows
 
-It can resolve the target document from:
+Target documents can be resolved from:
 
-- an exact filename mentioned in the message
-- the last uploaded file
-- the last generated or edited document
-- matching workspace documents
-- phrases such as `that pdf`, `last document`, or `same file`
+- exact filename
+- last uploaded file
+- last generated file
+- last edited file
+- phrases such as `last document`, `that PDF`, `same file`
+- matching files inside the active workspace
 
-Example prompts:
+After editing, the bot attempts to re-ingest the edited version so dashboard and knowledge-base views can reflect it.
 
-```text
-update that PDF and add a termination clause
-rewrite the last agreement with buyer name Rahul Sharma
-change seller name to Priya Mehta in the document
-mark all rows as reviewed in the spreadsheet
-update the agreement PDF and share the updated file
-```
-
-After editing, the bot sends the updated file back and attempts to ingest the updated version into the knowledge base.
-
-### PDF Handling
-
-PDFs are not edited in-place at the layout level. The bot extracts readable text, applies the instruction, and generates a new PDF.
-
-This means:
-
-- readable text PDFs work best
-- scanned/image-only PDFs need OCR support before reliable extraction
-- original visual layout may not be preserved
-- generated PDFs are text-based regenerated files
-
-### DOCX Handling
-
-The bot supports direct DOCX edits such as:
-
-```text
-replace old clause with new clause
-add paragraph: Payment due within 7 days.
-update deed with buyer name Rahul Sharma and seller name Priya Mehta
-```
-
-It recognizes common placeholders:
-
-```text
-[BUYER]
-[BUYER NAME]
-{{BUYER}}
-{{BUYER_NAME}}
-Buyer Name
-Purchaser Name
-Name of Buyer
-[SELLER]
-[SELLER NAME]
-{{SELLER}}
-{{SELLER_NAME}}
-Seller Name
-Vendor Name
-Name of Seller
-```
-
-If direct replacement is not possible, it can ask the local LLM to rewrite the extracted document text and create a new DOCX.
-
-### XLSX Handling
-
-Spreadsheet operations currently support common edits:
-
-```text
-update column price +10%
-set B2 = 5000
-formula E2 = SUM(B2:D2)
-mark all rows as reviewed
-```
-
-The XLSX editor uses `openpyxl`.
-
-### Structured Business Logic
-
-Some business questions should not be left to the LLM. The project includes deterministic parsers for selected operational tables:
-
-```text
-rag/business_queries.py
-```
-
-Current structured logic includes:
-
-- property count by status
-- available/sold/rented/under-offer property counts
-- pending rent calculation
-- overdue rent calculation
-- tenant/account-specific rent checks
-- amount-specific rent checks
-
-Example answers are calculated from table rows, not guessed:
-
-```text
-how many properties are available?
-```
-
-Returns a count split by residential/commercial and lists property IDs.
-
-```text
-show pending rent list
-```
-
-Calculates:
-
-```text
-Rent Amt - Paid Amt
-```
-
-and lists only rows with a balance.
-
-```text
-does MedCare have pending rent?
-```
-
-Checks the MedCare row directly before answering.
-
-### Business Record Update Actions
-
-The project includes a structured updater for rent tracker PDFs.
-
-Example:
-
-```text
-RA-2307 this tenant paid its rent, update the PDF and share the updated PDF
-```
-
-The bot:
-
-1. Finds the rent tracker PDF.
-2. Finds row `RA-2307`.
-3. Updates paid amount, paid date, mode, and status.
-4. Generates an updated PDF.
-5. Copies it into uploads as a current version.
-6. Re-ingests it into the knowledge base.
-7. Sends the updated PDF back.
-
-This is implemented as one structured tool inside the generic action layer. Similar structured updaters can be added for other recurring business workflows.
-
-### Tavily Web Search and Scraping
-
-The bot supports optional external web lookup through Tavily.
-
-This is disabled by default because it sends search queries and URLs to an external service.
-
-Enable it in `.env`:
-
-```text
-ALLOW_WEB_SEARCH=true
-TAVILY_API_KEY=your_tavily_api_key
-TAVILY_SEARCH_DEPTH=basic
-TAVILY_MAX_RESULTS=5
-```
-
-Supported examples:
-
-```text
-search web for latest stamp duty rates in Maharashtra
-look up current home loan interest rates
-what is the latest real estate news in Mumbai?
-scrape https://example.com/page and summarize it
-```
-
-Implementation:
-
-```text
-utils/web_search.py
-```
-
-It uses:
-
-- Tavily `/search` for current web search
-- Tavily `/extract` for direct URL/page scraping
-
-The assistant combines local company context with web results and asks the local LLM to answer with source URLs.
-
-### Voice Notes
-
-Telegram voice notes are processed as follows:
-
-1. Download `.ogg`.
-2. Convert to `.wav` with FFmpeg.
-3. Transcribe locally using Whisper.
-4. Send the transcribed text through the same assistant pipeline.
-
-Implementation:
-
-```text
-voice/transcriber.py
-```
+Important PDF note: PDFs are not edited in place with layout preservation. Readable PDF text is extracted, changed, and regenerated as a new text-based PDF.
 
 ### Image Generation
 
-The bot can generate images from natural prompts.
+Implemented in:
 
-Local Stable Diffusion can be used if configured.
+```text
+images/generator.py
+```
 
-If enabled, Pollinations may be used as an external fallback:
+Images are generated from natural prompts and stored in:
+
+```text
+workspace/generated/<workspace>/
+```
+
+Local Stable Diffusion can be used if configured. If local generation is unavailable and enabled, Pollinations can be used as an external fallback:
 
 ```text
 ALLOW_IMAGE_EXTERNAL_FALLBACK=true
 ```
 
-Generated images are saved under:
+Keep this disabled for private/confidential prompts.
+
+### Voice Notes
+
+Implemented in:
 
 ```text
-workspace/generated/
+voice/transcriber.py
 ```
 
-## Project Structure
+Flow:
+
+1. Telegram `.ogg` voice file is downloaded.
+2. FFmpeg converts audio.
+3. Whisper transcribes locally.
+4. Transcript is sent through the same question pipeline.
+
+### Web Search
+
+Implemented in:
 
 ```text
-main.py
-  Main CLI entrypoint.
-
-run.py
-  Compatibility wrapper around main.py.
-
-bot/
-  telegram_bot.py
-    Active Telegram bot handlers and orchestration.
-
-llm/
-  ollama_client.py
-    Local Ollama chat client and model selection.
-
-rag/
-  knowledge_base.py
-    File loading, ChromaDB ingestion, tenant collections, lexical fallback retrieval.
-
-  pipeline.py
-    Main question-answer pipeline.
-
-  business_queries.py
-    Deterministic parsers/calculators for structured operational questions.
-
-docs/
-  document_ops.py
-    DOCX, XLSX, PDF, TXT generation and editing helpers.
-
-  document_actions.py
-    Generic document action router for update/edit/rewrite/modify workflows.
-
-images/
-  generator.py
-    Stable Diffusion hook and Pollinations fallback.
-
-voice/
-  transcriber.py
-    FFmpeg conversion and Whisper transcription.
-
-utils/
-  config.py
-    Environment loading and runtime directory setup.
-
-  doctor.py
-    System and dependency checker.
-
-  intents.py
-    Basic intent classification and helper parsing.
-
-  storage.py
-    JSON storage for tasks, knowledge notes, chat memory, and tenant state.
-
-  web_search.py
-    Tavily Search and Extract integration.
-
-data/
-  Runtime JSON state, tasks, logs, notes.
-
-workspace/
-  uploads/
-    Uploaded/current documents.
-
-  generated/
-    Generated and edited documents/images.
-
-  chroma/
-    Local vector database.
-
-autonova/
-  Older Phase 1 implementation retained for reference and partial compatibility.
+utils/web_search.py
 ```
+
+Disabled by default. Enable with:
+
+```text
+ALLOW_WEB_SEARCH=true
+TAVILY_API_KEY=your_key
+```
+
+Use it for:
+
+```text
+search web for latest stamp duty rates
+look up current home loan rates
+scrape https://example.com and summarize it
+```
+
+External web search may send query text or URLs to Tavily.
+
+## How The Assistant Answers
+
+Implemented in:
+
+```text
+rag/pipeline.py
+```
+
+General flow:
+
+1. Load recent chat memory.
+2. Rewrite short follow-ups such as `give details` using recent context.
+3. Detect document-scoped/local vs external/general intent.
+4. Run deterministic business/query handlers where possible.
+5. Query structured JSON records.
+6. Retrieve file context from ChromaDB and lexical fallback search.
+7. Use Tavily when explicitly requested or when the question is clearly current/external and web search is enabled.
+8. Ask Ollama to answer using the available context.
 
 ## Setup
-
-Recommended Python:
-
-```text
-Python 3.11
-```
 
 Create and activate a virtual environment:
 
@@ -448,19 +401,27 @@ Copy environment template:
 Copy-Item .env.example .env
 ```
 
-Set your Telegram token:
+Install and start Ollama, then pull recommended models:
 
-```text
-TELEGRAM_BOT_TOKEN=123456:ABC...
+```powershell
+ollama pull llama3.2
+ollama pull mistral
+ollama pull mxbai-embed-large
+ollama serve
 ```
 
-## Environment Settings
+Install FFmpeg for voice notes and Tesseract for OCR if those features are needed.
+
+## Environment Variables
 
 Core:
 
 ```text
 TELEGRAM_BOT_TOKEN=
 ALLOWED_TELEGRAM_USER_IDS=
+
+DASHBOARD_ADMIN_USERNAME=admin
+DASHBOARD_ADMIN_PASSWORD=
 
 OLLAMA_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=llama3.2:latest
@@ -471,18 +432,19 @@ DATA_DIR=data
 CHROMA_DIR=workspace/chroma
 UPLOADS_DIR=workspace/uploads
 GENERATED_DIR=workspace/generated
+STRUCTURED_DIR=workspace/structured
 
 WHISPER_MODEL=base
 ```
 
-Optional external image fallback:
+Optional images:
 
 ```text
 ALLOW_IMAGE_EXTERNAL_FALLBACK=false
 STABLE_DIFFUSION_MODEL=
 ```
 
-Optional Tavily web search:
+Optional web:
 
 ```text
 ALLOW_WEB_SEARCH=false
@@ -491,219 +453,273 @@ TAVILY_SEARCH_DEPTH=basic
 TAVILY_MAX_RESULTS=5
 ```
 
-## System Requirements
+## Run Commands
 
-- Python 3.10+, recommended 3.11
-- FFmpeg on PATH for voice notes
-- Ollama installed and running
-- Ollama chat model, usually `llama3.2:latest` or `mistral`
-- Ollama embedding model, usually `mxbai-embed-large:latest`
-- Telegram bot token
-- Tavily API key only if web search is enabled
-
-Pull recommended Ollama models:
+Check dependencies:
 
 ```powershell
-ollama pull llama3.2
-ollama pull mistral
-ollama pull mxbai-embed-large
+.\.venv\Scripts\python.exe main.py doctor
 ```
 
-## Run
-
-Check system:
+Run dashboard:
 
 ```powershell
-python main.py doctor
+.\.venv\Scripts\python.exe main.py dashboard
 ```
 
 Run Telegram bot:
 
 ```powershell
-python main.py bot
+.\.venv\Scripts\python.exe main.py bot
 ```
 
-Ask locally:
+Ask a local CLI question:
 
 ```powershell
-python main.py ask "How many properties are available?"
+.\.venv\Scripts\python.exe main.py ask "hello"
 ```
 
-Ingest supported files from `data/`:
+Ingest files from `data/`:
 
 ```powershell
-python main.py ingest
+.\.venv\Scripts\python.exe main.py ingest
 ```
 
-## Telegram Workflow
+Regenerate structured JSON for one workspace:
 
-### Set Company Workspace
-
-```text
-/company AutoNova Realty
+```powershell
+.\.venv\Scripts\python.exe main.py structure --tenant codsoft
 ```
 
-This creates a workspace ID like:
+Compile check:
 
-```text
-autonova_realty
+```powershell
+.\.venv\Scripts\python.exe -m compileall bot dashboard docs images rag utils main.py
 ```
 
-That workspace controls:
+## Example Telegram Prompts
 
-- ChromaDB collection
-- chat memory
-- last uploaded file
-- last generated document
-- document action context
-
-### Upload Knowledge Documents
-
-Upload one or more files with:
+Knowledge:
 
 ```text
-save to knowledge base
+save this to knowledge base
+show my knowledge base
+how many files are in my knowledge base?
+remove "filename.pdf" from knowledge base
 ```
 
-or:
+Questions:
 
 ```text
-these are my business details, save them
+summarize this document
+how many questions are in this PDF?
+list the table rows
+give more details
 ```
 
-The bot stores and ingests them.
-
-### Ask Operational Questions
+Documents:
 
 ```text
-how many properties are available?
-show pending rent list
-does MedCare have pending rent?
-what is the commission for a 2 crore sale?
-summarize the SOP for onboarding a property
+draft a rental agreement for 11 months
+create a report from this document
+edit the last document and change landlord name to Shadab
+replace buyer name with Rahul Sharma
 ```
 
-### Draft Documents
+Images:
 
 ```text
-draft a rent follow-up letter for Kiran Desai
-prepare a sales proposal for PR-003
-write an agreement for buyer Rahul and seller Priya
+generate image of a person coding on a laptop
+make the previous image brighter and add labels
 ```
 
-### Edit Documents
+Web:
 
 ```text
-update that PDF and add a new termination clause
-replace buyer name with Rahul Sharma in the last document
-mark all rows as reviewed in the spreadsheet
-RA-2307 this tenant paid its rent, update the PDF and share it
-```
-
-### Web Search
-
-Requires Tavily enabled.
-
-```text
-search web for latest stamp duty rates in Maharashtra
+search web for latest AI regulations in India
 scrape https://example.com and summarize it
 ```
 
-## Answering Workflow
+## File Structure
 
-For a normal question:
+```text
+main.py
+  CLI entrypoint for doctor, ingest, structure, ask, bot, and dashboard.
 
-1. Load recent chat memory.
-2. Check deterministic business parsers for known structured operations.
-3. Retrieve local company context from ChromaDB and lexical file search.
-4. If the question needs current web information and Tavily is enabled, search or extract web content.
-5. Send local context and/or web context to Ollama.
-6. Return an answer to Telegram.
+run.py
+  Compatibility wrapper.
 
-For a document action:
+bot/
+  telegram_bot.py
+    Active Telegram bot handlers, workspace linking, uploads, actions, image/document workflows.
 
-1. Detect action intent.
-2. Resolve target document.
-3. Apply direct structured update if available.
-4. Otherwise use the general document editor/rewrite path.
-5. Save output to `workspace/generated/`.
-6. Copy current updated version to `workspace/uploads/`.
-7. Re-ingest updated file if possible.
-8. Send updated file to Telegram.
+dashboard/
+  server.py
+    Dashboard HTTP server, auth, registration, sessions, overview APIs, document APIs.
 
-## Security and Privacy
+  static/index.html
+    Admin/user dashboard UI.
 
-Local by default:
+docs/
+  document_ops.py
+    DOCX/XLSX/PDF/TXT creation and editing helpers.
 
-- Ollama chat is local.
-- Ollama embeddings are local.
-- Whisper transcription is local.
+  document_actions.py
+    Generic document action detection and target resolution.
+
+  user_manual.md
+    End-user prompt and workflow guide.
+
+images/
+  generator.py
+    Local Stable Diffusion hook and Pollinations fallback.
+
+llm/
+  ollama_client.py
+    Ollama chat wrapper and model fallback behavior.
+
+rag/
+  knowledge_base.py
+    File loading, ChromaDB ingestion, tenant collections, lexical retrieval, knowledge file management.
+
+  pipeline.py
+    Main question-answer routing pipeline.
+
+  structured_store.py
+    Universal structured decoder and structured query answering.
+
+  document_queries.py
+    Document-scoped query helpers and target file resolution.
+
+  document_workflows.py
+    Workflows for creating documents from uploaded/source documents.
+
+  question_classifier.py
+    Question-bank document generation/classification helpers.
+
+  business_queries.py
+    Deterministic business logic for selected property/rent queries.
+
+  ocr.py
+    OCR image extraction helpers.
+
+utils/
+  config.py
+    Environment loading, path setup, workspace-safe IDs.
+
+  doctor.py
+    Dependency/system checker.
+
+  intents.py
+    Intent classification and prompt cleanup.
+
+  storage.py
+    JSON state storage, chat history, tenant state, notes/tasks.
+
+  web_search.py
+    Tavily Search/Extract integration and web query routing helpers.
+
+voice/
+  transcriber.py
+    FFmpeg + Whisper voice transcription.
+
+data/
+  Runtime JSON state, dashboard users, admin bootstrap credentials.
+
+workspace/
+  uploads/<workspace>/
+    Uploaded and current workspace documents.
+
+  generated/<workspace>/
+    Generated/edited documents and images.
+
+  structured/<workspace>/documents.json
+    Structured decoded records for that workspace.
+
+  chroma/
+    Local ChromaDB vector database files.
+
+autonova/
+  Older Phase 1 implementation retained for reference.
+```
+
+## Data, Privacy, And Runtime Files
+
+Local-first by default:
+
+- Ollama chat runs locally.
+- Ollama embeddings run locally.
 - ChromaDB is local.
-- Runtime files are ignored by Git.
+- Whisper transcription is local.
+- JSON runtime state is local.
 
 External only when enabled:
 
+- Tavily web search/extract
 - Pollinations image fallback
-- Tavily web search and page extraction
 
-Do not enable external services for confidential client data unless the business accepts that data may leave the machine.
+Do not enable external features for confidential client data unless that is acceptable for the deployment.
 
-## Runtime Files Ignored by Git
+Runtime files may contain secrets, documents, chat history, and generated legal/business content. Keep them out of Git:
 
 ```text
 .env
 .venv/
 data/*.json
 data/*.jsonl
+data/dashboard_admin_bootstrap.txt
 workspace/chroma/
 workspace/generated/
 workspace/uploads/
+workspace/structured/
 ```
 
-These may contain:
+## Qualities
 
-- Telegram tokens
-- Tavily API keys
-- uploaded client/company documents
-- generated legal/business files
-- vector database content
-- chat history
-- business memory
+- Workspace isolated: company data is separated by workspace ID.
+- Local-first: core LLM, embeddings, vector DB, and transcription are local.
+- Dashboard protected: admin/user sessions enforce workspace access.
+- Practical document support: handles common business PDFs, Word files, spreadsheets, and generated docs.
+- Structured before generative: deterministic record queries are tried before LLM fallback.
+- Extensible: new structured parsers and document actions can be added without rewriting the bot.
 
-## Current Limitations
+## Limitations
 
-- PDF editing regenerates a new text-based PDF; it does not preserve original layout perfectly.
-- Scanned/image-only PDFs need OCR support before reliable understanding.
-- General table extraction is still basic; structured parsers exist for selected business workflows.
-- DOCX full rewrite may not preserve complex formatting.
-- XLSX support covers common operations, not every spreadsheet transformation.
-- Runtime memory is JSON-based, not a robust multi-user database.
-- Telegram chat ID is the current workspace/security boundary.
-- Web search is external and only works when Tavily is configured.
-- There is no full audit/approval workflow for high-risk business changes yet.
+- Runtime state is JSON-based, not a production database.
+- Dashboard auth is suitable for local/internal use, not hardened enterprise identity.
+- PDF editing regenerates text-based PDFs and does not preserve complex original layouts.
+- DOCX rewrite may lose advanced formatting.
+- XLSX editing supports common operations, not every spreadsheet workflow.
+- OCR quality depends on Tesseract and source image quality.
+- Chroma/Ollama availability affects retrieval and answer quality.
+- External web/image providers are disabled by default and may receive prompts/queries when enabled.
+- No full audit trail, approval workflow, or document version UI yet.
 
 ## Recommended Next Improvements
 
-- Add OCR for scanned PDFs and image documents.
-- Store extracted tables as structured JSON alongside vector chunks.
-- Add a document registry with version history and audit logs.
-- Add approval prompts before modifying important documents.
-- Add database-backed tenants/users/permissions.
-- Add richer DOCX/PDF layout preservation.
-- Add more deterministic parsers for business-specific sheets.
-- Add automated tests for document action workflows.
+- Move dashboard users, sessions, chat state, and activity logs to a real database.
+- Add document version history and audit logs.
+- Add confirmation/approval prompts for high-risk document changes.
+- Add automated tests around workspace isolation and document actions.
+- Improve PDF layout preservation and table extraction.
+- Add richer dashboard previews for generated images/documents.
+- Add role permissions beyond admin/user.
+- Add cleanup/archive tools for old generated files.
 
-## Test Commands
+## Troubleshooting
+
+Run:
 
 ```powershell
-python main.py doctor
-python main.py ingest
-python main.py ask "hello"
-python main.py ask "how many properties are available?"
-python main.py ask "show pending rent list"
-python -m compileall bot llm rag voice docs images utils main.py
+.\.venv\Scripts\python.exe main.py doctor
 ```
 
-## Notes
+Common fixes:
 
-Restart the Telegram bot after code or `.env` changes. A running bot process keeps old code and old environment settings in memory.
+- Start Ollama: `ollama serve`
+- Pull models: `ollama pull llama3.2`, `ollama pull mistral`, `ollama pull mxbai-embed-large`
+- Install dependencies: `python -m pip install -r requirements.txt`
+- Install FFmpeg for voice notes.
+- Install Tesseract for OCR.
+- Restart the bot/dashboard after editing code or `.env`.
+

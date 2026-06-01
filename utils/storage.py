@@ -84,7 +84,7 @@ def update_chat_state(chat_id: int, updates: dict[str, Any]) -> dict[str, Any]:
     return state
 
 
-def append_chat_history(chat_id: int, role: str, content: str, limit: int = 12) -> list[dict[str, str]]:
+def append_chat_history(chat_id: int, role: str, content: str, limit: int = 1000) -> list[dict[str, str]]:
     states = read_json("conversation_state.json", {})
     state = states.get(str(chat_id), {})
     history = state.get("history", [])

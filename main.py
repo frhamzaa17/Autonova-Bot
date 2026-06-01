@@ -24,9 +24,14 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("doctor")
     sub.add_parser("ingest")
+    structure_parser = sub.add_parser("structure")
+    structure_parser.add_argument("--tenant", default=None)
     ask_parser = sub.add_parser("ask")
     ask_parser.add_argument("query", nargs="+")
     sub.add_parser("bot")
+    dashboard_parser = sub.add_parser("dashboard")
+    dashboard_parser.add_argument("--host", default="127.0.0.1")
+    dashboard_parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
 
     if args.command == "doctor":
@@ -37,6 +42,11 @@ def main() -> None:
 
         count = ingest_data_folder()
         print(f"Ingested {count} chunks into local ChromaDB.")
+    elif args.command == "structure":
+        from rag.structured_store import structure_existing_files
+
+        count = structure_existing_files(args.tenant)
+        print(f"Decoded {count} file(s) into the structured knowledge base.")
     elif args.command == "ask":
         doctor_or_stop()
         from rag.pipeline import answer_query
@@ -47,6 +57,10 @@ def main() -> None:
         from bot.telegram_bot import run_bot
 
         run_bot()
+    elif args.command == "dashboard":
+        from dashboard.server import run_dashboard
+
+        run_dashboard(args.host, args.port)
     else:
         parser.print_help()
         raise SystemExit(2)

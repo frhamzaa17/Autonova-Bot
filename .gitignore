@@ -9,6 +9,8 @@ workspace/uploads/
 
 data/*.json
 data/*.jsonl
+data/*.log
+data/dashboard_admin_bootstrap.txt
 
 .pytest_cache/
 .mypy_cache/

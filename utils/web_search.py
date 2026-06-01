@@ -14,6 +14,17 @@ WEB_QUERY_RE = re.compile(
     r"\b(search\s+(?:the\s+)?web|web\s+search|look\s+up|google|online|internet|latest|current|today|recent|news|market\s+rate|updated|scrape|extract\s+(?:this\s+)?(?:url|page|website))\b",
     flags=re.I,
 )
+FINANCE_WEB_RE = re.compile(
+    r"\b(stocks?|shares?|equity|nse|bse|nasdaq|nyse|sensex|nifty|crypto|bitcoin|finance|financial\s+market|"
+    r"stock\s+market|share\s+market|fundamental\s+analysis|technical\s+analysis|candlestick|valuation|"
+    r"pe\s+ratio|p/e|eps|market\s+cap|dividend|balance\s+sheet|cash\s+flow)\b",
+    flags=re.I,
+)
+EXTERNAL_KNOWLEDGE_RE = re.compile(
+    r"\b(how\s+to|what\s+is|explain|guide|tutorial|steps?|strategy|strategies|best\s+way|learn|"
+    r"analy[sz]e|analysis|evaluate|research|compare|forecast|outlook)\b",
+    flags=re.I,
+)
 URL_RE = re.compile(r"https?://[^\s)>\]]+", flags=re.I)
 
 
@@ -41,7 +52,11 @@ def _auth_headers(api_key: str) -> dict[str, str]:
 
 
 def wants_web_search(text: str) -> bool:
-    return bool(WEB_QUERY_RE.search(text))
+    if WEB_QUERY_RE.search(text) or URL_RE.search(text):
+        return True
+    if FINANCE_WEB_RE.search(text):
+        return True
+    return bool(EXTERNAL_KNOWLEDGE_RE.search(text) and re.search(r"\b(api|library|law|rules?|price|rate|market|company|product|service|platform)\b", text, re.I))
 
 
 def _topic_for_query(query: str) -> str:

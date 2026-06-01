@@ -18,7 +18,12 @@ PEOPLE_RE = re.compile(r"\b(people|persons?|students?|candidates?|eligible|names
 QUESTION_RE = re.compile(r"\b(questions?|problems?|coding\s+questions?)\b", re.I)
 PDF_RE = re.compile(r"\b(pdf|document|file|list)\b", re.I)
 REFERENCE_ID_RE = re.compile(r"\b[A-Z]{1,4}\d{6,}\b")
-DOCUMENT_RE = re.compile(r"\b(pdf|document|file|list|sheet|spreadsheet|docx|word|excel|xlsx|uploaded|last|this)\b", re.I)
+DOCUMENT_RE = re.compile(r"\b(pdf|document|file|sheet|spreadsheet|docx|word|excel|xlsx|uploaded)\b", re.I)
+REFERENTIAL_DOCUMENT_RE = re.compile(
+    r"\b(this|that|last|previous|same|uploaded)\s+(pdf|document|file|sheet|spreadsheet|docx|word|excel|xlsx)\b"
+    r"|\b(in|from|about|inside)\s+(this|that|the|last|uploaded)\s+(pdf|document|file|sheet|spreadsheet|docx|word|excel|xlsx)\b",
+    re.I,
+)
 MAX_FULL_CONTEXT_CHARS = 90000
 
 
@@ -328,6 +333,10 @@ def target_document(query: str, tenant_id: str | None = None, preferred_file: st
     return _target_file(query, tenant_id, preferred_file)
 
 
+def is_document_scoped_query(query: str) -> bool:
+    return bool(DOCUMENT_RE.search(query) or REFERENTIAL_DOCUMENT_RE.search(query))
+
+
 def answer_document_count(query: str, tenant_id: str | None = None, preferred_file: str | None = None) -> str | None:
     if not (COUNT_RE.search(query) and (PEOPLE_RE.search(query) or QUESTION_RE.search(query) or PDF_RE.search(query))):
         return None
@@ -354,7 +363,7 @@ def answer_document_count(query: str, tenant_id: str | None = None, preferred_fi
 def answer_full_document_query(query: str, tenant_id: str | None = None, preferred_file: str | None = None) -> str | None:
     if wants_web_question(query):
         return None
-    if not preferred_file and not DOCUMENT_RE.search(query):
+    if not is_document_scoped_query(query):
         return None
 
     target = _target_file(query, tenant_id, preferred_file)
@@ -375,7 +384,7 @@ def answer_full_document_query(query: str, tenant_id: str | None = None, preferr
         "Do not answer from memory or partial excerpts. For lists, counts, names, IDs, statuses, dates, "
         "tables, eligibility, totals, clauses, and conditions, inspect all supplied content carefully. "
         "If the supplied content is truncated, say that the answer is based on the visible extracted content. "
-        "Cite the file name and mention exact rows, IDs, names, clauses, or fields used when useful."
+        "Do not show internal file paths, raw source rows, or source labels unless the user explicitly asks for sources."
     )
     if truncated:
         instruction += " The extracted content was too large for one model request and has been truncated."

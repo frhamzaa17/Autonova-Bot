@@ -5,7 +5,6 @@ import argparse
 from .assistant import Assistant
 from .config import TELEGRAM_TOKEN, ensure_directories
 from .llm import ollama_status
-from .server import run_server
 from .telegram_bot import TelegramBot
 
 
@@ -13,9 +12,9 @@ def main() -> None:
     ensure_directories()
     parser = argparse.ArgumentParser(description="AutoNova Phase 1 assistant")
     sub = parser.add_subparsers(dest="command")
-    dashboard = sub.add_parser("dashboard", help="Run local web dashboard")
+    dashboard = sub.add_parser("dashboard", help="Run secure web dashboard")
     dashboard.add_argument("--host", default="127.0.0.1")
-    dashboard.add_argument("--port", type=int, default=8000)
+    dashboard.add_argument("--port", type=int, default=8765)
     sub.add_parser("bot", help="Run Telegram bot")
     sub.add_parser("doctor", help="Check LLM and Telegram configuration")
     once = sub.add_parser("once", help="Send one local test message")
@@ -46,4 +45,6 @@ def main() -> None:
         for path in result.get("files", []):
             print(path)
     else:
-        run_server(args.host, args.port)
+        from dashboard.server import run_dashboard
+
+        run_dashboard(args.host, args.port)

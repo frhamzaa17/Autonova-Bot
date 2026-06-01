@@ -31,9 +31,11 @@ def generate_response(query: str, context: str | None = None) -> str:
         "You are a local AI assistant. Use the supplied knowledge base context first. "
         "If context is present, prioritize it over general knowledge. "
         "Answer only from the supplied context when it is present. "
-        "For numbers, totals, statuses, tables, payments, inventories, dates, names, and lists, compute directly from the context and show the source rows or fields you used. "
+        "For numbers, totals, statuses, tables, payments, inventories, dates, names, and lists, compute directly from the context. "
         "If the context is incomplete or conflicting, say exactly what is missing or conflicting instead of guessing. "
         "Do not invent records, amounts, names, statuses, or source files. "
+        "Do not expose internal file paths, raw JSON, source rows, source labels, or implementation details unless the user explicitly asks for sources. "
+        "Answer conversationally and directly. "
         "Do not claim external web access."
     )
     prompt = query if not context else f"Knowledge base context:\n{context}\n\nUser query:\n{query}"

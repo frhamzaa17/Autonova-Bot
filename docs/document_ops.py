@@ -116,11 +116,50 @@ def _replace_in_docx(document: Document, replacements: dict[str, str]) -> int:
         text = paragraph.text
         updated = text
         for old, new in replacements.items():
-            updated = updated.replace(old, new)
+            if not old:
+                continue
+            updated = re.sub(re.escape(old), new, updated, flags=re.I)
         if updated != text:
             paragraph.text = updated
             changed += 1
     return changed
+
+
+def _clean_replacement_term(value: str) -> str:
+    cleaned = value.strip()
+    cleaned = re.sub(r"^(?:the\s+)?(?:word|text|term|phrase|name|value)\s+", "", cleaned, flags=re.I).strip()
+    cleaned = re.sub(
+        r"\s+(?:in|inside|from|of)\s+(?:the\s+)?(?:document|file|pdf|docx|word\s+document)\s*$",
+        "",
+        cleaned,
+        flags=re.I,
+    ).strip()
+    return cleaned.strip(" \t\r\n\"'`.,:;")
+
+
+def _extract_replacement(instruction: str) -> tuple[str, str] | None:
+    quoted = re.search(
+        r"\b(?:replace|change)\b\s+(?:the\s+)?(?:word|text|term|phrase|name|value)?\s*"
+        r"[\"'`]([^\"'`]+)[\"'`]"
+        r"(?:\s+(?:in|inside|from|of)\s+(?:the\s+)?(?:document|file|pdf|docx|word\s+document))?\s+"
+        r"(?:with|to)\s+(?:the\s+)?(?:word|text|term|phrase|name|value)?\s*"
+        r"[\"'`]([^\"'`]+)[\"'`]",
+        instruction,
+        flags=re.I,
+    )
+    if quoted:
+        old, new = (_clean_replacement_term(part) for part in quoted.groups())
+        return (old, new) if old else None
+
+    unquoted = re.search(
+        r"\b(?:replace|change)\b\s+(.+?)\s+(?:with|to)\s+(.+)",
+        instruction,
+        flags=re.I,
+    )
+    if not unquoted:
+        return None
+    old, new = (_clean_replacement_term(part) for part in unquoted.groups())
+    return (old, new) if old else None
 
 
 def _extract_party_names(instruction: str) -> dict[str, str]:
@@ -195,10 +234,12 @@ def modify_docx(path: Path, instruction: str, tenant_id: str | None = None) -> P
     output_dir = tenant_generated_dir(settings, tenant_id) if tenant_id else settings.generated_dir
     document = Document(path)
     changed = 0
-    replace_match = re.search(r"replace\s+(.+?)\s+with\s+(.+)", instruction, flags=re.I)
-    if replace_match:
-        old, new = replace_match.groups()
+    replacement = _extract_replacement(instruction)
+    if replacement:
+        old, new = replacement
         changed += _replace_in_docx(document, {old: new})
+        if changed == 0:
+            return _rewrite_docx_with_llm(path, instruction, _docx_text(document), tenant_id)
     elif re.search(r"\b(add|append)\b", instruction, flags=re.I):
         content = re.sub(r"^\s*(add|append)\s+(paragraph|section|text)?\s*:?", "", instruction, flags=re.I).strip()
         document.add_paragraph(content or instruction)
