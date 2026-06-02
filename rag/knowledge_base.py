@@ -12,9 +12,15 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from utils.config import Settings, load_settings, safe_workspace_id
 from rag.ocr import IMAGE_EXTENSIONS, is_image_file, extract_image_text
+from rag.markdown_converter import (
+    CONVERTIBLE_EXTENSIONS,
+    is_markdown_sidecar,
+    markdown_sidecar_path,
+    readable_markdown_path,
+)
 
 
-SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx", ".xlsx"} | IMAGE_EXTENSIONS
+SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx", ".xlsx"} | IMAGE_EXTENSIONS | CONVERTIBLE_EXTENSIONS
 TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 
@@ -50,7 +56,21 @@ def _embeddings(settings: Settings) -> OllamaEmbeddings:
     return OllamaEmbeddings(model=settings.ollama_embedding_model, base_url=settings.ollama_url)
 
 
-def _load_file(path: Path) -> list[Document]:
+def _load_file(path: Path, tenant_id: str | None = None) -> list[Document]:
+    if path.suffix.lower() in CONVERTIBLE_EXTENSIONS and not is_markdown_sidecar(path):
+        markdown_path = readable_markdown_path(path, tenant_id)
+        if markdown_path != path and markdown_path.exists():
+            docs = TextLoader(str(markdown_path), encoding="utf-8").load()
+            for doc in docs:
+                doc.metadata.update(
+                    {
+                        "source": str(path),
+                        "markdown_source": str(markdown_path),
+                        "kind": "markdown_conversion",
+                    }
+                )
+            return docs
+
     suffix = path.suffix.lower()
     if is_image_file(path):
         text = extract_image_text(path)
@@ -111,7 +131,7 @@ def _candidate_files(settings: Settings, tenant_id: str | None = None) -> list[P
             continue
         paths = root.rglob("*") if tenant_id else root.glob("*")
         for path in paths:
-            if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
+            if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS and not is_markdown_sidecar(path):
                 files.append(path)
     return files
 
@@ -158,6 +178,8 @@ def knowledge_files(tenant_id: str | None) -> list[KnowledgeFile]:
         if not source:
             continue
         path = Path(source)
+        if is_markdown_sidecar(path):
+            continue
         files.append(
             KnowledgeFile(
                 path=path,
@@ -211,6 +233,13 @@ def remove_knowledge_file(selector: str, tenant_id: str | None) -> KnowledgeRemo
         if remove_structured_document(path, tenant_id):
             structured_removed += 1
         vectors_removed = _delete_vectors_for_source(path, tenant_id) or vectors_removed
+        sidecar = markdown_sidecar_path(path, tenant_id)
+        if sidecar.exists():
+            if remove_structured_document(sidecar, tenant_id):
+                structured_removed += 1
+            vectors_removed = _delete_vectors_for_source(sidecar, tenant_id) or vectors_removed
+            sidecar.unlink()
+            removed_files.append(sidecar)
         if path.exists() and path.is_file():
             path.unlink()
             removed_files.append(path)
@@ -227,7 +256,10 @@ def clear_knowledge_base(tenant_id: str | None) -> KnowledgeRemovalResult:
             continue
         paths = root.rglob("*") if tenant_id else root.glob("*")
         for path in paths:
-            if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
+            if path.is_file() and is_markdown_sidecar(path):
+                path.unlink()
+                removed_files.append(path)
+            elif path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
                 path.unlink()
                 removed_files.append(path)
     structured_removed = clear_structured_documents(tenant_id)
@@ -243,7 +275,7 @@ def _lexical_context(query: str, settings: Settings, tenant_id: str | None = Non
     scored: list[tuple[int, Path, str]] = []
     for path in _candidate_files(settings, tenant_id):
         try:
-            docs = _load_file(path)
+            docs = _load_file(path, tenant_id)
         except Exception:
             continue
         text = "\n".join(doc.page_content for doc in docs if doc.page_content.strip())
@@ -271,14 +303,14 @@ def ingest_data_folder(settings: Settings | None = None, tenant_id: str | None =
         return 0
     paths = root.rglob("*") if tenant_id else root.glob("*")
     for path in paths:
-        if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
+        if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS and not is_markdown_sidecar(path):
             try:
                 from rag.structured_store import upsert_document
 
                 upsert_document(path, tenant_id)
             except Exception:
                 pass
-            docs.extend(_load_file(path))
+            docs.extend(_load_file(path, tenant_id))
 
     if not docs:
         return 0
@@ -298,12 +330,20 @@ def ingest_file(path: Path, tenant_id: str) -> int:
         upsert_document(path, tenant_id)
     except Exception:
         pass
-    docs = _load_file(path)
+    ingest_path = readable_markdown_path(path, tenant_id) if path.suffix.lower() in CONVERTIBLE_EXTENSIONS else path
+    docs = _load_file(ingest_path, tenant_id)
     if not docs:
         return 0
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=160)
     chunks = splitter.split_documents(docs)
+    for chunk in chunks:
+        chunk.metadata["source"] = str(path)
+        if ingest_path != path:
+            chunk.metadata["markdown_source"] = str(ingest_path)
     store = _vector_store(settings, tenant_id)
+    _delete_vectors_for_source(path, tenant_id)
+    if ingest_path != path:
+        _delete_vectors_for_source(ingest_path, tenant_id)
     store.add_documents(chunks)
     return len(chunks)
 

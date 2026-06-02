@@ -8,6 +8,7 @@ from shutil import copy2
 from docs.document_ops import create_pdf, process_uploaded_document, update_rent_tracker_pdf
 from llm.ollama_client import generate_response
 from rag.document_queries import _text_for_file
+from rag.markdown_converter import CONVERTIBLE_EXTENSIONS, is_markdown_sidecar
 from rag.knowledge_base import ingest_file
 from utils.config import load_settings, tenant_generated_dir, tenant_uploads_dir
 
@@ -21,7 +22,7 @@ IMPLICIT_ACTION_RE = re.compile(
     flags=re.I,
 )
 DOCUMENT_RE = re.compile(r"\b(pdf|docx|xlsx|document|file|agreement|contract|letter|report|proposal|sheet|spreadsheet|tracker|form)\b", flags=re.I)
-SUPPORTED_SUFFIXES = {".pdf", ".docx", ".xlsx", ".txt", ".md"}
+SUPPORTED_SUFFIXES = {".md"} | CONVERTIBLE_EXTENSIONS
 
 
 @dataclass(frozen=True)
@@ -51,7 +52,11 @@ def _candidate_documents(tenant_id: str) -> list[Path]:
     for root in roots:
         if not root.exists():
             continue
-        files.extend(path for path in root.rglob("*") if path.is_file() and path.suffix.lower() in SUPPORTED_SUFFIXES)
+        files.extend(
+            path
+            for path in root.rglob("*")
+            if path.is_file() and path.suffix.lower() in SUPPORTED_SUFFIXES and not is_markdown_sidecar(path)
+        )
     return sorted(files, key=lambda item: item.stat().st_mtime, reverse=True)
 
 
@@ -126,7 +131,7 @@ def _resolve_document(instruction: str, chat_state: dict, tenant_id: str) -> Pat
 
 
 def _rewrite_text_document(path: Path, instruction: str, tenant_id: str) -> Path:
-    original = _text_for_file(path)
+    original = _text_for_file(path, tenant_id)
     revised = generate_response(
         (
             "Edit this business document according to the instruction. "

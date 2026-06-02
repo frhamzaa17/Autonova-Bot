@@ -8,10 +8,12 @@ from rag.document_queries import (
     answer_document_count,
     answer_document_records,
     answer_full_document_query,
+    answer_universal_document_query,
     is_document_scoped_query,
 )
 from rag.knowledge_base import retrieve_context
 from rag.structured_store import answer_structured_query, structured_context, structured_documents
+from utils.config import load_settings
 from utils.web_search import answer_with_web, wants_web_search
 
 
@@ -122,11 +124,14 @@ def _should_use_web_before_local(query: str, document_scoped: bool, tenant_id: s
 
     local_score = _local_relevance_score(query, tenant_id)
     strong_local_entity = _has_strong_local_entity(query, tenant_id)
+    has_local_documents = bool(structured_documents(tenant_id))
     explicit_local = bool(LOCAL_KNOWLEDGE_RE.search(query))
     local_operation = bool(LOCAL_OPERATION_RE.search(query))
     general_info = bool(GENERAL_INFO_RE.search(query))
 
-    if general_info and not strong_local_entity and not document_scoped:
+    if has_local_documents and local_score >= 1:
+        return False
+    if general_info and not strong_local_entity and not document_scoped and not has_local_documents:
         return True
     if explicit_local and local_operation and not general_info:
         return False
@@ -136,7 +141,26 @@ def _should_use_web_before_local(query: str, document_scoped: bool, tenant_id: s
         return False
     if wants_web_search(query):
         return True
-    if general_info and local_score < 5:
+    if general_info and local_score < 5 and not has_local_documents:
+        return True
+    return False
+
+
+def _web_search_configured() -> bool:
+    settings = load_settings()
+    return bool(settings.allow_web_search and settings.tavily_api_key)
+
+
+def _should_use_web_fallback(query: str, document_scoped: bool, has_local_context: bool, tenant_id: str | None) -> bool:
+    if document_scoped:
+        return False
+    if not _web_search_configured():
+        return False
+    if EXPLICIT_WEB_RE.search(query) or wants_web_search(query):
+        return True
+    if GENERAL_INFO_RE.search(query) and not has_local_context:
+        return True
+    if GENERAL_INFO_RE.search(query) and _local_relevance_score(query, tenant_id) == 0:
         return True
     return False
 
@@ -152,7 +176,7 @@ def answer_query(
         return generate_response(query)
 
     document_scoped = is_document_scoped_query(query)
-    document_preference = preferred_file if document_scoped else None
+    document_preference = preferred_file
     web_first = _should_use_web_before_local(query, document_scoped, tenant_id)
 
     for deterministic in (answer_pending_rent, answer_property_count):
@@ -166,6 +190,14 @@ def answer_query(
             return answer
         except Exception as exc:
             return f"I could not use web search for this request: {exc}"
+
+    document_count = answer_document_count(query, tenant_id=tenant_id, preferred_file=document_preference)
+    if document_count:
+        return document_count
+
+    document_records = answer_document_records(query, tenant_id=tenant_id, preferred_file=document_preference)
+    if document_records and (document_scoped or preferred_file):
+        return document_records
 
     structured_answer = answer_structured_query(query, tenant_id=tenant_id)
     if structured_answer:
@@ -182,16 +214,28 @@ def answer_query(
         except Exception as exc:
             return f"I could not use web search for this request: {exc}"
 
+    universal_answer = answer_universal_document_query(
+        query,
+        tenant_id=tenant_id,
+        memory=memory,
+        preferred_file=document_preference,
+    )
+    if universal_answer:
+        return universal_answer
+
+    if _should_use_web_fallback(query, document_scoped, has_combined_context, tenant_id):
+        try:
+            answer, _sources = answer_with_web(query, combined_context if has_combined_context else None)
+            return answer
+        except Exception as exc:
+            return f"I could not use web search for this request: {exc}"
+
     if has_combined_context and not document_scoped:
         parts = []
         if memory:
             parts.append(f"Recent conversation:\n{memory}")
         parts.append(f"Structured and semantic knowledge base:\n{combined_context}")
         return generate_response(query, "\n\n".join(parts))
-
-    document_count = answer_document_count(query, tenant_id=tenant_id, preferred_file=document_preference)
-    if document_count:
-        return document_count
 
     document_records = answer_document_records(query, tenant_id=tenant_id, preferred_file=document_preference)
     if document_records:
@@ -200,6 +244,13 @@ def answer_query(
     document_answer = answer_full_document_query(query, tenant_id=tenant_id, preferred_file=document_preference)
     if document_answer:
         return document_answer
+
+    if _should_use_web_fallback(query, document_scoped, bool(combined_context), tenant_id):
+        try:
+            answer, _sources = answer_with_web(query, combined_context if combined_context else None)
+            return answer
+        except Exception as exc:
+            return f"I could not use web search for this request: {exc}"
 
     parts = []
     if memory:

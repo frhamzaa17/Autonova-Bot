@@ -9,6 +9,7 @@ import mimetypes
 import os
 import secrets
 import shutil
+import importlib.util
 from collections import Counter
 from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -17,7 +18,9 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import requests
 
+from rag.ocr import DEFAULT_TESSERACT_PATH
 from rag.knowledge_base import ingest_file, knowledge_files, remove_knowledge_file
+from rag.markdown_converter import CONVERTIBLE_EXTENSIONS
 from rag.structured_store import upsert_document
 from utils.config import load_settings, safe_workspace_id, tenant_generated_dir, tenant_uploads_dir
 from utils.storage import now_iso, read_json, write_json
@@ -25,7 +28,7 @@ from utils.storage import now_iso, read_json, write_json
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-SUPPORTED_UPLOADS = {".pdf", ".docx", ".xlsx", ".txt", ".md", ".jpg", ".jpeg", ".png", ".webp"}
+SUPPORTED_UPLOADS = {".md"} | CONVERTIBLE_EXTENSIONS
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 DOCUMENT_SUFFIXES = {".pdf", ".docx", ".xlsx", ".txt", ".md"}
 USERS_FILE = "dashboard_users.json"
@@ -308,6 +311,8 @@ def _ollama_status() -> dict:
 
 def _integration_payload() -> list[dict]:
     settings = load_settings()
+    tesseract_path = shutil.which("tesseract") or (str(DEFAULT_TESSERACT_PATH) if DEFAULT_TESSERACT_PATH.exists() else "")
+    docling_available = importlib.util.find_spec("docling") is not None
     return [
         _ollama_status(),
         {
@@ -326,9 +331,14 @@ def _integration_payload() -> list[dict]:
             "detail": str(settings.chroma_dir),
         },
         {
+            "name": "Docling",
+            "status": "configured" if docling_available else "missing",
+            "detail": "Primary document converter" if docling_available else "Install Python requirements to enable Docling conversion",
+        },
+        {
             "name": "OCR",
-            "status": "configured" if shutil.which("tesseract") else "missing",
-            "detail": shutil.which("tesseract") or "Tesseract is not on PATH",
+            "status": "configured" if tesseract_path else "missing",
+            "detail": tesseract_path or "Tesseract is not installed or not on PATH",
         },
         {
             "name": "Voice Transcription",
@@ -336,6 +346,25 @@ def _integration_payload() -> list[dict]:
             "detail": shutil.which("ffmpeg") or "FFmpeg is not on PATH",
         },
     ]
+
+
+def _uploaded_form_files(form: cgi.FieldStorage) -> list[cgi.FieldStorage]:
+    items: list[cgi.FieldStorage] = []
+
+    def collect(field) -> None:
+        if isinstance(field, list):
+            for item in field:
+                collect(item)
+            return
+        nested = getattr(field, "list", None)
+        if nested:
+            collect(nested)
+            return
+        if getattr(field, "filename", "") and getattr(field, "file", None):
+            items.append(field)
+
+    collect(form.list or [])
+    return items
 
 
 def _overview(workspace: str | None, user: dict) -> dict:
@@ -575,32 +604,58 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "Expected multipart file upload"}, 400)
             return
         params["boundary"] = params["boundary"].encode()
-        form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ={"REQUEST_METHOD": "POST"}, keep_blank_values=True)
-        upload = form["file"] if "file" in form else None
-        if upload is None or not getattr(upload, "filename", ""):
-            self._send_json({"error": "Choose a file to upload"}, 400)
-            return
-        name = Path(upload.filename).name
-        if Path(name).suffix.lower() not in SUPPORTED_UPLOADS:
-            self._send_json({"error": f"Unsupported file type: {Path(name).suffix}"}, 400)
+        form = cgi.FieldStorage(
+            fp=self.rfile,
+            headers=self.headers,
+            environ={
+                "REQUEST_METHOD": "POST",
+                "CONTENT_TYPE": self.headers.get("Content-Type", ""),
+                "CONTENT_LENGTH": self.headers.get("Content-Length", "0"),
+            },
+            keep_blank_values=True,
+        )
+        uploads = _uploaded_form_files(form)
+        if not uploads:
+            self._send_json({"error": "Choose files to upload"}, 400)
             return
         settings = load_settings()
-        path = tenant_uploads_dir(settings, workspace) / name
-        path.write_bytes(upload.file.read())
-        decoded = upsert_document(path, workspace)
-        ingest_error = ""
-        try:
-            ingest_file(path, workspace)
-        except Exception as exc:
-            ingest_error = str(exc)
+        results = []
+        uploaded_count = 0
+        total_records = 0
+        for upload in uploads:
+            name = Path(upload.filename).name
+            suffix = Path(name).suffix.lower()
+            if suffix not in SUPPORTED_UPLOADS:
+                results.append({"name": name, "records": 0, "chunks": 0, "error": f"Unsupported file type: {suffix}"})
+                continue
+            path = tenant_uploads_dir(settings, workspace) / name
+            try:
+                path.write_bytes(upload.file.read())
+                decoded = upsert_document(path, workspace)
+                records = int((decoded or {}).get("summary", {}).get("record_count") or 0)
+                chunks = 0
+                ingest_error = ""
+                try:
+                    chunks = ingest_file(path, workspace)
+                    decoded = upsert_document(path, workspace)
+                    records = int((decoded or {}).get("summary", {}).get("record_count") or records)
+                except Exception as exc:
+                    ingest_error = str(exc)
+                uploaded_count += 1
+                total_records += records
+                results.append({"name": name, "records": records, "chunks": chunks, "ingest_error": ingest_error})
+            except Exception as exc:
+                results.append({"name": name, "records": 0, "chunks": 0, "ingest_error": str(exc)})
+        status = 201 if uploaded_count else 400
         self._send_json(
             {
-                "ok": True,
-                "name": name,
-                "records": int((decoded or {}).get("summary", {}).get("record_count") or 0),
-                "ingest_error": ingest_error,
+                "ok": uploaded_count > 0,
+                "error": "" if uploaded_count else "No files were uploaded successfully.",
+                "uploaded": uploaded_count,
+                "records": total_records,
+                "files": results,
             },
-            201,
+            status,
         )
 
     def do_DELETE(self) -> None:

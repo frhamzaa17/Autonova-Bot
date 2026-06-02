@@ -85,8 +85,8 @@ def _requested_count(text: str, default: int = 20) -> int:
     return default
 
 
-def classify_questions_from_document(path: Path) -> list[ClassifiedQuestion]:
-    titles = _question_titles(_text_for_file(path))
+def classify_questions_from_document(path: Path, tenant_id: str | None = None) -> list[ClassifiedQuestion]:
+    titles = _question_titles(_text_for_file(path, tenant_id))
     classified: list[ClassifiedQuestion] = []
     for raw in titles:
         parsed = _split_title(raw)
@@ -133,8 +133,8 @@ def _importance_score(question: ClassifiedQuestion) -> tuple[int, int]:
     return score, -question.number
 
 
-def important_questions_from_document(path: Path, limit: int = 20) -> list[ClassifiedQuestion]:
-    questions = classify_questions_from_document(path)
+def important_questions_from_document(path: Path, limit: int = 20, tenant_id: str | None = None) -> list[ClassifiedQuestion]:
+    questions = classify_questions_from_document(path, tenant_id)
     ranked = sorted(questions, key=_importance_score, reverse=True)
     return sorted(ranked[:limit], key=lambda item: item.number)
 
@@ -198,7 +198,7 @@ def create_question_classification_bundle(
     if not source:
         return None
 
-    questions = classify_questions_from_document(source)
+    questions = classify_questions_from_document(source, tenant_id)
     if not questions:
         return None
 
@@ -221,7 +221,7 @@ def create_important_questions_bundle(
         return None
 
     requested_count = _requested_count(instruction, default=20)
-    questions = important_questions_from_document(source, requested_count)
+    questions = important_questions_from_document(source, requested_count, tenant_id)
     if not questions:
         return None
 

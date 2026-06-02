@@ -1,10 +1,13 @@
 .env
 .venv/
+markitdown-main/
+markitdown-main/venv/
 __pycache__/
 *.py[cod]
 
 workspace/chroma/
 workspace/generated/
+workspace/structured/default/
 workspace/uploads/
 
 data/*.json

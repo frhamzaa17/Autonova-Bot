@@ -173,7 +173,7 @@
           <article class="panel" id="documentsPanel">
             <div class="panel-head"><div><h2>Knowledge Base Manager</h2><span>Upload, download, or remove workspace documents</span></div></div>
             <div class="doc-tools">
-              <label class="primary upload" id="uploadControl"><i data-lucide="upload"></i>Upload document<input id="fileInput" type="file" onchange="uploadDocument(this.files[0])"></label>
+              <label class="primary upload" id="uploadControl"><i data-lucide="upload"></i>Upload documents<input id="fileInput" type="file" multiple onchange="uploadDocuments(this.files)"></label>
               <button class="secondary hidden" id="backWorkspaceList" onclick="showWorkspaceList()"><i data-lucide="arrow-left"></i>Workspaces</button>
               <button class="secondary" onclick="loadOverview()"><i data-lucide="refresh-cw"></i>Refresh</button>
             </div>
@@ -202,7 +202,7 @@
     let overview = {};
     let sessionUser = null;
     const workspace = document.getElementById('workspace');
-    workspace.addEventListener('change', loadOverview);
+    workspace.addEventListener('change', () => loadOverview());
 
     function escapeHtml(value) {
       return String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
@@ -214,6 +214,9 @@
     function toast(message) {
       const box = document.getElementById('toast'); box.textContent = message; box.classList.add('show');
       setTimeout(() => box.classList.remove('show'), 3600);
+    }
+    function refreshIcons() {
+      if (window.lucide?.createIcons) window.lucide.createIcons();
     }
     function showAuth(mode) {
       document.getElementById('loginForm').classList.toggle('hidden', mode !== 'login');
@@ -251,7 +254,7 @@
     function showLogin() {
       document.getElementById('auth').classList.remove('hidden');
       document.getElementById('app').classList.add('hidden');
-      lucide.createIcons();
+      refreshIcons();
     }
     function showApp() {
       document.getElementById('auth').classList.add('hidden');
@@ -262,6 +265,7 @@
       sessionUser = null; overview = {}; showLogin();
     }
     async function loadOverview(forceDefault = false) {
+      forceDefault = forceDefault === true;
       const selected = forceDefault ? (sessionUser?.role === 'admin' ? 'all' : '') : (workspace.value || '');
       const response = await fetch(`/api/overview?workspace=${encodeURIComponent(selected)}`);
       if (response.status === 401) return showLogin();
@@ -284,7 +288,7 @@
       document.getElementById('backWorkspaceList').classList.toggle('hidden', !(isAdmin && overview.workspace !== 'all'));
       document.getElementById('sideNote').textContent = isAdmin ? 'Admin can inspect registered workspaces and system health.' : 'This login is locked to its own company workspace.';
       Object.entries(overview.stats || {}).forEach(([key, value]) => { const node = document.getElementById(key); if (node) node.textContent = value; });
-      renderChart(); renderProcess(); renderDocumentsV2(); renderActivity(); renderAdmin(); lucide.createIcons();
+      renderChart(); renderProcess(); renderDocuments(); renderActivity(); renderAdmin(); refreshIcons();
     }
     function renderChart() {
       const items = overview.analytics || []; const max = Math.max(1, ...items.flatMap(item => [item.queries, item.edits, item.images]));
@@ -310,16 +314,6 @@
       </div>`).join('');
     }
     function renderDocuments() {
-      const docs = overview.documents || [];
-      document.getElementById('docRows').innerHTML = docs.length ? docs.map(doc => {
-        const ws = doc.workspace || overview.workspace;
-        return `<tr><td class="name" title="${escapeHtml(doc.name)}">${escapeHtml(doc.name)}<br><small>${formatBytes(doc.size)}${doc.workspace ? ` · ${escapeHtml(doc.workspace)}` : ''}</small></td>
-          <td>${escapeHtml(doc.type)}</td><td>${doc.records}</td><td>${escapeHtml((doc.updated_at || '').replace('T',' '))}</td><td>
-          <div style="display:flex"><a class="icon-button" title="Download document" href="/api/document?workspace=${encodeURIComponent(ws)}&name=${encodeURIComponent(doc.name)}"><i data-lucide="download"></i></a>
-          <button class="icon-button" title="Remove document" onclick="removeDocument('${encodeURIComponent(ws)}','${encodeURIComponent(doc.name)}')"><i data-lucide="trash-2"></i></button></div></td></tr>`;
-      }).join('') : '<tr><td colspan="5"><div class="empty">No knowledge documents in this workspace yet.</div></td></tr>';
-    }
-    function renderDocumentsV2() {
       if (overview.role === 'admin' && overview.workspace === 'all') {
         renderWorkspaceDocumentsIndex();
         return;
@@ -393,19 +387,23 @@
         <td>${escapeHtml(user.workspace)}</td><td><span class="badge">${escapeHtml(user.status)}</span></td>
       </tr>`).join('') : '<tr><td colspan="4"><div class="empty">No company registrations yet.</div></td></tr>';
       document.getElementById('integrations').innerHTML = (overview.integrations || []).map(item => `<div class="integration">
-        <i class="dot ${escapeHtml(item.status)}"></i><div><b>${escapeHtml(item.name)}</b><br><small>${escapeHtml(item.status)} · ${escapeHtml(item.detail)}</small></div>
+        <i class="dot ${escapeHtml(item.status)}"></i><div><b>${escapeHtml(item.name)}</b><br><small>${escapeHtml(item.status)} &middot; ${escapeHtml(item.detail)}</small></div>
       </div>`).join('');
     }
-    async function uploadDocument(file) {
-      if (!file) return;
+    async function uploadDocuments(files) {
+      files = Array.from(files || []);
+      if (!files.length) return;
       const ws = workspace.value;
       if (ws === 'all') return toast('Choose a workspace before uploading.');
-      const form = new FormData(); form.append('file', file);
-      toast(`Uploading ${file.name}...`);
+      const form = new FormData();
+      files.forEach(file => form.append('file', file));
+      toast(`Uploading ${files.length} document${files.length === 1 ? '' : 's'}...`);
       const response = await fetch(`/api/documents?workspace=${encodeURIComponent(ws)}`, {method:'POST', body:form});
       const data = await response.json();
       if (!response.ok) return toast(data.error || 'Upload failed');
-      toast(`${data.name} structured with ${data.records} records${data.ingest_error ? '; vector ingest needs attention' : ''}.`);
+      const failed = (data.files || []).filter(item => item.error || item.ingest_error);
+      const totalRecords = (data.files || []).reduce((sum, item) => sum + Number(item.records || 0), 0);
+      toast(`${data.uploaded || 0} file${data.uploaded === 1 ? '' : 's'} uploaded, ${totalRecords} records${failed.length ? `, ${failed.length} need attention` : ''}.`);
       document.getElementById('fileInput').value = ''; loadOverview();
     }
     async function removeDocument(ws, name, category = 'uploaded') {

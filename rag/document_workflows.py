@@ -50,7 +50,7 @@ def create_source_document_bundle(
         return None
 
     try:
-        text = _text_for_file(source)
+        text = _text_for_file(source, tenant_id)
     except Exception:
         return None
     if not text.strip():

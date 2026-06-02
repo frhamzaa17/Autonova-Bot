@@ -10,6 +10,7 @@ from typing import Any
 from openpyxl import load_workbook
 from pypdf import PdfReader
 
+from rag.markdown_converter import CONVERTIBLE_EXTENSIONS, is_markdown_sidecar, readable_text
 from rag.ocr import IMAGE_EXTENSIONS, extract_image_text, is_image_file
 from utils.config import load_settings, safe_workspace_id
 
@@ -24,7 +25,7 @@ QUESTION_TITLE_RE = re.compile(
 MCQ_QUESTION_RE = re.compile(r"^\s*Q?(\d{1,3})\s*[\.)-]\s*(.+?)\s*$", re.I)
 MCQ_OPTION_RE = re.compile(r"^\s*([A-D])\s*[\.)-]\s*(.+?)\s*$", re.I)
 ANSWER_KEY_RE = re.compile(r"\b(\d{1,3})\s*[-:]\s*([A-D])\b", re.I)
-SUPPORTED_TEXT_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".txt", ".md"} | IMAGE_EXTENSIONS
+SUPPORTED_TEXT_EXTENSIONS = {".md"} | CONVERTIBLE_EXTENSIONS | IMAGE_EXTENSIONS
 STATUSES = ("Available", "Under Offer", "Sold", "Rented")
 PHONE_RE = re.compile(r"\b(?:\d{2,5}[- ]?)?(?:\d|X){3,5}[- ]?(?:\d|X){3,5}(?:[- ]?(?:\d|X){2,5})?\b", re.I)
 EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
@@ -136,8 +137,12 @@ def _find_line_index(lines: list[str], marker: str, start: int = 0) -> int | Non
     return None
 
 
-def _text_for_file(path: Path) -> str:
+def _text_for_file(path: Path, tenant_id: str | None = None) -> str:
     suffix = path.suffix.lower()
+    if suffix in CONVERTIBLE_EXTENSIONS and not is_markdown_sidecar(path):
+        text = readable_text(path, tenant_id)
+        if text.strip():
+            return text
     if is_image_file(path):
         return extract_image_text(path)
     if suffix in {".txt", ".md"}:
@@ -170,7 +175,11 @@ def _text_for_file(path: Path) -> str:
 
 
 def _lines(text: str) -> list[str]:
-    return [line.strip() for line in text.splitlines() if line.strip()]
+    return [line.strip() for line in _strip_conversion_metadata(text).splitlines() if line.strip()]
+
+
+def _strip_conversion_metadata(text: str) -> str:
+    return re.sub(r"^\s*<!--\s*AutoNova Markdown conversion.*?-->\s*", "", text, flags=re.S)
 
 
 def _classify_document(path: Path, text: str) -> str:
@@ -341,7 +350,7 @@ def _parse_universal_records(text: str, source: Path, document_type: str) -> lis
 
 
 def _document_profile_record(lines: list[str], source: Path, document_type: str) -> dict[str, Any]:
-    title = next((line for line in lines[:8] if len(line) > 3), source.stem)
+    title = next((line.lstrip("# ").strip() for line in lines[:8] if len(line.lstrip("# ").strip()) > 3), source.stem)
     return {
         "kind": "document_profile",
         "title": title[:180],
@@ -354,6 +363,8 @@ def _document_profile_record(lines: list[str], source: Path, document_type: str)
 def _parse_key_value_records(lines: list[str], source: Path) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for index, line in enumerate(lines):
+        if _split_table_line(line):
+            continue
         key_value = KEY_VALUE_RE.match(line)
         if not key_value:
             continue
@@ -376,6 +387,8 @@ def _parse_key_value_records(lines: list[str], source: Path) -> list[dict[str, A
 def _parse_entity_records(lines: list[str], source: Path) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for index, line in enumerate(lines):
+        if _split_table_line(line):
+            continue
         entities = _entities_from_line(line)
         if entities:
             records.append(
@@ -466,7 +479,7 @@ def _parse_inline_table_records(lines: list[str], source: Path) -> list[dict[str
     index = 0
     while index < len(lines):
         row = _split_table_line(lines[index])
-        if len(row) < 2:
+        if len(row) < 2 or _is_markdown_table_separator(row):
             index += 1
             continue
         block: list[tuple[int, list[str]]] = []
@@ -474,15 +487,18 @@ def _parse_inline_table_records(lines: list[str], source: Path) -> list[dict[str
             cells = _split_table_line(lines[index])
             if len(cells) < 2:
                 break
-            block.append((index + 1, cells))
+            if not _is_markdown_table_separator(cells):
+                block.append((index + 1, cells))
             index += 1
         if len(block) >= 2:
             header_index = _header_row_index([cells for _line, cells in block])
             table_index += 1
+            table_title = _nearest_heading(lines, block[0][0] - 2)
             records.append(
                 {
                     "kind": "table",
                     "table": table_index,
+                    "title": table_title,
                     "row_count": max(len(block) - (1 if header_index is not None else 0), 0),
                     "source_line": block[0][0],
                     "source_file": str(source),
@@ -501,6 +517,7 @@ def _parse_inline_table_records(lines: list[str], source: Path) -> list[dict[str
                             {
                                 "kind": "table_row",
                                 "table": table_index,
+                                "table_title": table_title,
                                 "row_number": row_number,
                                 "fields": fields,
                                 "source_line": source_line,
@@ -513,6 +530,7 @@ def _parse_inline_table_records(lines: list[str], source: Path) -> list[dict[str
                         {
                             "kind": "table_row",
                             "table": table_index,
+                            "table_title": table_title,
                             "row_number": row_number,
                             "values": [_normalize_scalar(cell) for cell in cells],
                             "source_line": source_line,
@@ -521,6 +539,19 @@ def _parse_inline_table_records(lines: list[str], source: Path) -> list[dict[str
                     )
         index += 1
     return records[:300]
+
+
+def _is_markdown_table_separator(cells: list[str]) -> bool:
+    return bool(cells) and all(re.fullmatch(r":?-{3,}:?", cell.strip()) for cell in cells)
+
+
+def _nearest_heading(lines: list[str], before_index: int) -> str:
+    for line in reversed(lines[: max(before_index + 1, 0)]):
+        if line.startswith("#"):
+            return line.lstrip("# ").strip()
+        if _looks_like_heading(line) and not _split_table_line(line):
+            return line.rstrip(":")
+    return ""
 
 
 def _parse_stacked_table_records(lines: list[str], source: Path) -> list[dict[str, Any]]:
@@ -866,6 +897,101 @@ def _parse_rent_records(text: str, source: Path) -> list[dict[str, Any]]:
     return records
 
 
+def _value_text(value: Any) -> str:
+    if isinstance(value, dict):
+        return str(value.get("raw") or value.get("date") or value.get("amount") or "")
+    return "" if value is None else str(value)
+
+
+def _field_text(fields: dict[str, Any], *names: str) -> str:
+    for name in names:
+        value = fields.get(name)
+        if value not in (None, ""):
+            return _value_text(value).strip()
+    return ""
+
+
+def _field_amount(fields: dict[str, Any], *names: str) -> int:
+    for name in names:
+        value = fields.get(name)
+        if isinstance(value, dict) and isinstance(value.get("amount"), int):
+            return int(value["amount"])
+        text = _value_text(value)
+        if text:
+            amount = _parse_money(text)
+            if amount:
+                return amount
+    return 0
+
+
+def _records_from_markdown_tables(records: list[dict[str, Any]], document_type: str, source: Path) -> list[dict[str, Any]]:
+    if document_type == "property_listing":
+        return _property_records_from_table_rows(records, source)
+    if document_type == "rent_collection_tracker":
+        return _rent_records_from_table_rows(records, source)
+    return []
+
+
+def _property_records_from_table_rows(records: list[dict[str, Any]], source: Path) -> list[dict[str, Any]]:
+    parsed: list[dict[str, Any]] = []
+    for record in records:
+        if record.get("kind") != "table_row" or not isinstance(record.get("fields"), dict):
+            continue
+        fields = record["fields"]
+        prop_id = _field_text(fields, "prop_id", "property_id", "id").upper()
+        if not PROPERTY_ROW_ID_RE.match(prop_id):
+            continue
+        price_text = _field_text(fields, "price_inr", "price_rent_inr", "price", "rent")
+        parsed.append(
+            {
+                "kind": "property",
+                "property_id": prop_id,
+                "category": "residential" if prop_id.startswith("PR-") else "commercial",
+                "location": _field_text(fields, "location"),
+                "property_type": _field_text(fields, "type"),
+                "area_sqft": _field_amount(fields, "area_sqft", "area"),
+                "floor": _field_text(fields, "floor"),
+                "price": price_text,
+                "price_amount": _parse_money(price_text),
+                "status": _field_text(fields, "status"),
+                "source_file": str(source),
+                "source_line": record.get("source_line"),
+            }
+        )
+    return parsed
+
+
+def _rent_records_from_table_rows(records: list[dict[str, Any]], source: Path) -> list[dict[str, Any]]:
+    parsed: list[dict[str, Any]] = []
+    for record in records:
+        if record.get("kind") != "table_row" or not isinstance(record.get("fields"), dict):
+            continue
+        fields = record["fields"]
+        agreement_id = _field_text(fields, "agr_id", "agreement_id", "id").upper()
+        if not AGREEMENT_ROW_ID_RE.match(agreement_id):
+            continue
+        rent_amount = _field_amount(fields, "rent_amt", "rent_amount", "rent")
+        paid_amount = _field_amount(fields, "paid_amt", "paid_amount", "paid")
+        parsed.append(
+            {
+                "kind": "rent",
+                "agreement_id": agreement_id,
+                "tenant": _field_text(fields, "tenant", "tenant_company", "company"),
+                "property_id": _field_text(fields, "property", "property_id").upper(),
+                "due_date": _field_text(fields, "due_date"),
+                "paid_on": _field_text(fields, "paid_on"),
+                "mode": _field_text(fields, "mode"),
+                "rent_amount": rent_amount,
+                "paid_amount": paid_amount,
+                "pending_amount": max(rent_amount - paid_amount, 0),
+                "status": _field_text(fields, "status"),
+                "source_file": str(source),
+                "source_line": record.get("source_line"),
+            }
+        )
+    return parsed
+
+
 def _parse_rental_agreement_records(text: str, source: Path) -> list[dict[str, Any]]:
     lines = _lines(text)
     records: list[dict[str, Any]] = []
@@ -1061,6 +1187,10 @@ def _contact_record(kind: str, headers: tuple[str, ...], values: list[str], sour
 
 
 def _parse_question_records(text: str, source: Path) -> list[dict[str, Any]]:
+    code_records = _parse_code_question_records(text, source)
+    if code_records:
+        return code_records
+
     answer_key = _parse_answer_key(text)
     mcq_records = _parse_mcq_records(text, source, answer_key)
     if mcq_records:
@@ -1088,6 +1218,32 @@ def _parse_question_records(text: str, source: Path) -> list[dict[str, Any]]:
             }
         )
     return records
+
+
+def _parse_code_question_records(text: str, source: Path) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    pattern = re.compile(
+        r"(?ms)^#{1,3}\s*(\d{1,3})\.\s+([^\n]+)\n(.*?)(?=^#{1,3}\s*\d{1,3}\.\s+|\Z)"
+    )
+    for match in pattern.finditer(_strip_conversion_metadata(text)):
+        number = int(match.group(1))
+        title = re.sub(r"\s+", " ", match.group(2)).strip()
+        body = match.group(3).strip()
+        code_blocks = re.findall(r"```(?:[A-Za-z0-9_+-]+)?\s*(.*?)```", body, flags=re.S)
+        code = "\n".join(block.strip() for block in code_blocks if block.strip()).strip()
+        if not title:
+            continue
+        records.append(
+            {
+                "kind": "question",
+                "number": number,
+                "title": title,
+                "question_type": "coding",
+                "answer_text": code or re.sub(r"\s+", " ", body)[:2500],
+                "source_file": str(source),
+            }
+        )
+    return records[:300]
 
 
 def _parse_answer_key(text: str) -> dict[int, str]:
@@ -1172,14 +1328,15 @@ def _parse_clauses(text: str, source: Path) -> list[dict[str, Any]]:
 
 
 def decode_file(path: Path, tenant_id: str | None) -> dict[str, Any] | None:
-    if path.suffix.lower() not in SUPPORTED_TEXT_EXTENSIONS:
+    if path.suffix.lower() not in SUPPORTED_TEXT_EXTENSIONS or is_markdown_sidecar(path):
         return None
-    text = _text_for_file(path)
+    text = _text_for_file(path, tenant_id)
     if not text.strip():
         return None
 
     document_type = _classify_document(path, text)
     records: list[dict[str, Any]] = _parse_universal_records(text, path, document_type)
+    records.extend(_records_from_markdown_tables(records, document_type, path))
     if path.suffix.lower() == ".xlsx":
         records.extend(_parse_xlsx_records(path))
     elif path.suffix.lower() == ".docx":
@@ -1246,7 +1403,7 @@ def structure_existing_files(tenant_id: str | None = None) -> int:
             continue
         paths = root.rglob("*") if tenant_id else root.glob("*")
         for path in paths:
-            if path.is_file() and path.suffix.lower() in SUPPORTED_TEXT_EXTENSIONS:
+            if path.is_file() and path.suffix.lower() in SUPPORTED_TEXT_EXTENSIONS and not is_markdown_sidecar(path):
                 decoded = decode_file(path, tenant_id)
                 if decoded:
                     documents.append(decoded)
@@ -1320,6 +1477,12 @@ def _tokens(text: str) -> set[str]:
 
 
 def _answer_question_from_records(query: str, records: list[dict[str, Any]]) -> str | None:
+    if not re.search(
+        r"\b(question|questions|problem|problems|code|coding|program|answer|mcq|option|tcs|nqt|java|python|prime|factorial|fibonacci|array|string|matrix|sort|search|q\s*\d{1,3})\b",
+        query,
+        re.I,
+    ):
+        return None
     questions = _dedupe_records(
         [record for record in records if record.get("kind") == "question"],
         ("source_file", "number", "title"),
@@ -1350,16 +1513,60 @@ def _answer_question_from_records(query: str, records: list[dict[str, Any]]) -> 
             best_score = scored[0][0]
             best_candidates = [record for score, record in scored if score == best_score]
             best_record = next((record for record in best_candidates if record.get("answer")), best_candidates[0])
-            if best_score >= max(1, min(3, len(_tokens(str(best_record.get("title", "")))))):
+            if best_score >= max(1, min(2, len(_tokens(str(best_record.get("title", "")))))):
                 selected = best_record
 
-    if not selected or not selected.get("answer"):
+    if not selected:
+        return None
+    if selected.get("answer_text") and not selected.get("answer"):
+        title = str(selected.get("title", "")).strip()
+        number = selected.get("number")
+        heading = f"{number}. {title}" if number else title
+        return f"{heading}\n{selected.get('answer_text')}".strip()
+    if not selected.get("answer"):
         return None
     answer = str(selected.get("answer", "")).upper()
     answer_text = str(selected.get("answer_text", "")).strip()
     if answer_text:
         return f"{answer}) {answer_text}"
     return answer
+
+
+def _answer_qa_pair_query(query: str, documents: list[dict[str, Any]], records: list[dict[str, Any]]) -> str | None:
+    qa_sources = {
+        str(document.get("source_file", ""))
+        for document in documents
+        if document.get("document_type") == "question_bank" or re.search(r"\b(faq|questions?)\b", str(document.get("file_name", "")), re.I)
+    }
+    qa_pairs = [
+        record
+        for record in records
+        if record.get("kind") == "qa_pair" and (not qa_sources or str(record.get("source_file", "")) in qa_sources)
+    ]
+    if not qa_pairs or not re.search(r"\b(faq|question|answer|say|what|how|can|is|does|process|documents?|rent|deposit|maintenance)\b", query, re.I):
+        return None
+
+    qa_stopwords = {
+        "what", "when", "where", "which", "who", "how", "why", "does", "say", "said", "according",
+        "document", "documents", "uploaded", "file", "files", "faq", "question", "answer", "process",
+        "list", "show", "give", "details", "detail", "about",
+    }
+    query_tokens = {token for token in _tokens(query) if token not in qa_stopwords and len(token) > 2}
+    if not query_tokens:
+        return None
+    scored: list[tuple[int, dict[str, Any]]] = []
+    for record in qa_pairs:
+        haystack = f"{record.get('question', '')} {record.get('answer', '')}"
+        score = len(query_tokens & _tokens(haystack))
+        if score:
+            scored.append((score, record))
+    if not scored:
+        return None
+    scored.sort(key=lambda item: item[0], reverse=True)
+    best_score, best = scored[0]
+    if best_score < 2 and len(query_tokens) > 2:
+        return None
+    return f"{best.get('question')}\n{best.get('answer')}".strip()
 
 
 def _answer_contact_query(query: str, records: list[dict[str, Any]]) -> str | None:
@@ -1836,11 +2043,12 @@ def answer_structured_query(query: str, tenant_id: str | None) -> str | None:
     if questions and re.search(r"\b(how many|count|number of|total)\b", lower) and re.search(r"\bquestions?|problems?\b", lower):
         return f"I found {len(questions)} question(s) in the structured question records."
 
+    qa_pair_answer = _answer_qa_pair_query(query, documents, records)
+    if qa_pair_answer:
+        return qa_pair_answer
+
     general_answer = _answer_general_structured_query(query, documents, records)
     if general_answer:
         return general_answer
 
-    context = structured_context(query, tenant_id, limit=4)
-    if context and re.search(r"\b(show|list|find|which|who|what|details?|record|clause|source)\b", lower):
-        return context
     return None

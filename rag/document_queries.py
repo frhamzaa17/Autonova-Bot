@@ -8,6 +8,7 @@ from openpyxl import load_workbook
 from pypdf import PdfReader
 
 from rag.knowledge_base import _candidate_files, _tokens
+from rag.markdown_converter import CONVERTIBLE_EXTENSIONS, is_markdown_sidecar, readable_text
 from rag.ocr import is_image_file, extract_image_text
 from utils.config import load_settings, safe_workspace_id
 from llm.ollama_client import generate_response
@@ -18,6 +19,7 @@ PEOPLE_RE = re.compile(r"\b(people|persons?|students?|candidates?|eligible|names
 QUESTION_RE = re.compile(r"\b(questions?|problems?|coding\s+questions?)\b", re.I)
 PDF_RE = re.compile(r"\b(pdf|document|file|list)\b", re.I)
 REFERENCE_ID_RE = re.compile(r"\b[A-Z]{1,4}\d{6,}\b")
+REFERENCE_ROW_RE = re.compile(r"^\s*([A-Z]{1,4}\d{6,})\s+(.+?)\s*$")
 DOCUMENT_RE = re.compile(r"\b(pdf|document|file|sheet|spreadsheet|docx|word|excel|xlsx|uploaded)\b", re.I)
 REFERENTIAL_DOCUMENT_RE = re.compile(
     r"\b(this|that|last|previous|same|uploaded)\s+(pdf|document|file|sheet|spreadsheet|docx|word|excel|xlsx)\b"
@@ -25,6 +27,13 @@ REFERENTIAL_DOCUMENT_RE = re.compile(
     re.I,
 )
 MAX_FULL_CONTEXT_CHARS = 90000
+MAX_UNIVERSAL_CONTEXT_CHARS = 70000
+UNIVERSAL_STOPWORDS = {
+    "the", "and", "for", "with", "from", "this", "that", "what", "when", "where", "which", "who",
+    "how", "why", "are", "is", "was", "were", "will", "would", "could", "should", "give", "show",
+    "tell", "more", "details", "about", "into", "your", "you", "me", "my", "our", "their", "there",
+    "document", "file", "pdf", "uploaded", "knowledge", "base", "according",
+}
 
 
 @dataclass(frozen=True)
@@ -47,8 +56,12 @@ def _read_pdf(path: Path) -> str:
     return "\n".join(page.extract_text() or "" for page in reader.pages)
 
 
-def _text_for_file(path: Path) -> str:
+def _text_for_file(path: Path, tenant_id: str | None = None) -> str:
     suffix = path.suffix.lower()
+    if suffix in CONVERTIBLE_EXTENSIONS and not is_markdown_sidecar(path):
+        text = readable_text(path, tenant_id)
+        if text.strip():
+            return text
     if is_image_file(path):
         return extract_image_text(path)
     if suffix == ".pdf":
@@ -97,10 +110,21 @@ def _count_xlsx(path: Path) -> DocumentCount | None:
     return None
 
 
-def _count_text_records(path: Path) -> DocumentCount | None:
-    text = _text_for_file(path)
+def _count_text_records(path: Path, tenant_id: str | None = None) -> DocumentCount | None:
+    text = _text_for_file(path, tenant_id)
     if not text.strip():
         return None
+
+    row_records = _records_from_reference_rows(text)
+    if row_records:
+        unique_ids = len({record.reference_id for record in row_records})
+        return DocumentCount(
+            path,
+            "candidate/name rows",
+            len(row_records),
+            unique_count=unique_ids,
+            method="reference ID + name rows in the full converted document",
+        )
 
     ids = REFERENCE_ID_RE.findall(text)
     if ids:
@@ -131,6 +155,7 @@ def _question_titles(text: str) -> list[str]:
     titles: list[str] = []
     seen: set[str] = set()
     patterns = [
+        r"(?:^|\n)\s*#{1,6}\s*(\d{1,3})\s*[.)-]\s*([^\n]{1,160})",
         r"(?:^|\n)\s*(?:question|problem|q)\s*(?:number|no\.?|#)?\s*(\d{1,3})\s*[:.)-]\s*([^\n]{1,160})",
         r"(?:^|\n)\s*(\d{1,3})\s*[.)-]\s+([A-Za-z][^\n]{3,160})",
     ]
@@ -147,8 +172,8 @@ def _question_titles(text: str) -> list[str]:
     return titles
 
 
-def _count_questions(path: Path) -> DocumentCount | None:
-    text = _text_for_file(path)
+def _count_questions(path: Path, tenant_id: str | None = None) -> DocumentCount | None:
+    text = _text_for_file(path, tenant_id)
     titles = _question_titles(text)
     if titles:
         return DocumentCount(path, "questions", len(titles), method="question headings")
@@ -159,15 +184,19 @@ def _count_questions(path: Path) -> DocumentCount | None:
     return None
 
 
-def _count_file(path: Path) -> DocumentCount | None:
+def _count_file(path: Path, tenant_id: str | None = None) -> DocumentCount | None:
     if path.suffix.lower() == ".xlsx":
         return _count_xlsx(path)
-    if path.suffix.lower() in {".pdf", ".docx", ".txt", ".md"}:
-        return _count_text_records(path)
+    if path.suffix.lower() in CONVERTIBLE_EXTENSIONS | {".md"}:
+        return _count_text_records(path, tenant_id)
     return None
 
 
 def _records_from_text(text: str) -> list[DocumentRecord]:
+    row_records = _records_from_reference_rows(text)
+    if row_records:
+        return row_records
+
     matches = list(REFERENCE_ID_RE.finditer(text))
     records: list[DocumentRecord] = []
     for index, match in enumerate(matches):
@@ -180,10 +209,26 @@ def _records_from_text(text: str) -> list[DocumentRecord]:
     return records
 
 
-def _records_for_file(path: Path) -> list[DocumentRecord]:
-    if path.suffix.lower() not in {".pdf", ".docx", ".txt", ".md", ".xlsx"}:
+def _records_from_reference_rows(text: str) -> list[DocumentRecord]:
+    records: list[DocumentRecord] = []
+    for line in text.splitlines():
+        line = line.replace("\f", " ").strip()
+        match = REFERENCE_ROW_RE.match(line)
+        if not match:
+            continue
+        name = re.sub(r"\s+", " ", match.group(2)).strip(" |,-:")
+        if not name or re.search(r"\b(candidate|reference|name|page)\b", name, re.I):
+            continue
+        if len(name.split()) < 1 or not re.search(r"[A-Za-z]", name):
+            continue
+        records.append(DocumentRecord(match.group(1), name))
+    return records
+
+
+def _records_for_file(path: Path, tenant_id: str | None = None) -> list[DocumentRecord]:
+    if path.suffix.lower() not in CONVERTIBLE_EXTENSIONS | {".md"}:
         return []
-    return _records_from_text(_text_for_file(path))
+    return _records_from_text(_text_for_file(path, tenant_id))
 
 
 def _requested_limit(query: str, default: int = 20) -> int:
@@ -222,7 +267,7 @@ def answer_document_records(query: str, tenant_id: str | None = None, preferred_
         return None
 
     try:
-        records = _records_for_file(target)
+        records = _records_for_file(target, tenant_id)
     except Exception as exc:
         return f"I found {target.name}, but I could not read its text clearly. {exc}"
     if not records:
@@ -346,7 +391,7 @@ def answer_document_count(query: str, tenant_id: str | None = None, preferred_fi
         return None
 
     try:
-        count = _count_questions(target) if QUESTION_RE.search(query) else _count_file(target)
+        count = _count_questions(target, tenant_id) if QUESTION_RE.search(query) else _count_file(target, tenant_id)
     except Exception as exc:
         return f"I found {target.name}, but I could not read its text clearly. {exc}"
     if not count:
@@ -354,7 +399,7 @@ def answer_document_count(query: str, tenant_id: str | None = None, preferred_fi
 
     unique_note = ""
     if count.unique_count is not None and count.unique_count != count.count:
-        unique_note = f" ({count.unique_count} unique reference IDs; duplicate IDs appear in the file)"
+        unique_note = f" ({count.unique_count} unique reference IDs; some reference IDs repeat in the file)"
 
     label = "eligible people/students" if "eligible" in target.stem.lower() or re.search(r"\beligible\b", query, re.I) else count.label
     return f"{target.name} contains {count.count} {label}{unique_note}."
@@ -371,7 +416,7 @@ def answer_full_document_query(query: str, tenant_id: str | None = None, preferr
         return None
 
     try:
-        text = _text_for_file(target)
+        text = _text_for_file(target, tenant_id)
     except Exception as exc:
         return f"I found {target.name}, but I could not read its text clearly. {exc}"
     if not text.strip():
@@ -383,6 +428,7 @@ def answer_full_document_query(query: str, tenant_id: str | None = None, preferr
         "Answer using the complete extracted document content supplied below. "
         "Do not answer from memory or partial excerpts. For lists, counts, names, IDs, statuses, dates, "
         "tables, eligibility, totals, clauses, and conditions, inspect all supplied content carefully. "
+        "Markdown tables are authoritative: read every row and column before calculating or listing results. "
         "If the supplied content is truncated, say that the answer is based on the visible extracted content. "
         "Do not show internal file paths, raw source rows, or source labels unless the user explicitly asks for sources."
     )
@@ -393,6 +439,123 @@ def answer_full_document_query(query: str, tenant_id: str | None = None, preferr
         f"{instruction}\n\nUser question:\n{query}",
         f"Full extracted content from {target.name}:\n{full_context}",
     )
+
+
+def _query_terms(query: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", query.lower())
+        if len(token) > 2 and token not in UNIVERSAL_STOPWORDS
+    }
+
+
+def _markdown_sections(text: str, source_name: str) -> list[dict[str, str]]:
+    sections: list[dict[str, str]] = []
+    current_title = source_name
+    current_lines: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        heading = re.match(r"^\s{0,3}(#{1,6})\s+(.+?)\s*$", line)
+        if heading:
+            if current_lines:
+                sections.append({"title": current_title, "text": "\n".join(current_lines).strip()})
+            current_title = heading.group(2).strip()
+            current_lines = [line]
+            continue
+        current_lines.append(line)
+    if current_lines:
+        sections.append({"title": current_title, "text": "\n".join(current_lines).strip()})
+    return [section for section in sections if section["text"].strip()]
+
+
+def _section_score(query_terms: set[str], file_name: str, section: dict[str, str]) -> int:
+    title_tokens = _query_terms(section.get("title", ""))
+    text = section.get("text", "")
+    text_tokens = _query_terms(text[:12000])
+    file_tokens = _query_terms(file_name)
+    score = len(query_terms & title_tokens) * 5
+    score += len(query_terms & file_tokens) * 3
+    score += len(query_terms & text_tokens)
+    lower_text = text.lower()
+    for term in query_terms:
+        if term in lower_text:
+            score += min(lower_text.count(term), 4)
+    return score
+
+
+def _universal_candidate_files(query: str, tenant_id: str | None, preferred_file: str | None = None) -> list[Path]:
+    preferred = target_document(query, tenant_id, preferred_file)
+    settings = load_settings()
+    candidates = _candidate_files(settings, tenant_id)
+    if preferred:
+        return [preferred, *[path for path in candidates if path != preferred]]
+    return candidates
+
+
+def _universal_context(query: str, tenant_id: str | None, preferred_file: str | None = None) -> tuple[str, bool]:
+    query_terms = _query_terms(query)
+    if not query_terms:
+        return "", False
+
+    scored_sections: list[tuple[int, float, str, str]] = []
+    for path in _universal_candidate_files(query, tenant_id, preferred_file):
+        try:
+            text = _text_for_file(path, tenant_id)
+            mtime = path.stat().st_mtime
+        except Exception:
+            continue
+        if not text.strip():
+            continue
+        sections = _markdown_sections(text, path.name)
+        if not sections:
+            sections = [{"title": path.name, "text": text}]
+        for section in sections:
+            score = _section_score(query_terms, path.name, section)
+            if score:
+                scored_sections.append((score, mtime, path.name, section["text"]))
+
+    if not scored_sections:
+        return "", False
+
+    scored_sections.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    parts: list[str] = []
+    used = 0
+    for _score, _mtime, file_name, text in scored_sections:
+        excerpt = text.strip()
+        if not excerpt:
+            continue
+        remaining = MAX_UNIVERSAL_CONTEXT_CHARS - used
+        if remaining <= 0:
+            break
+        block = f"Source document: {file_name}\nExtracted Markdown excerpt:\n{excerpt[:remaining]}"
+        parts.append(block)
+        used += len(block)
+    return "\n\n---\n\n".join(parts), bool(parts)
+
+
+def answer_universal_document_query(
+    query: str,
+    tenant_id: str | None = None,
+    memory: str | None = None,
+    preferred_file: str | None = None,
+) -> str | None:
+    if wants_web_question(query):
+        return None
+    context, has_context = _universal_context(query, tenant_id, preferred_file)
+    if not has_context:
+        return None
+    instruction = (
+        "You are answering from the user's uploaded/generated documents only. "
+        "Use the extracted Markdown excerpts as the source of truth. Read tables row-by-row, preserve IDs, names, dates, "
+        "amounts, code blocks, headings, and conditions exactly. For counts or totals, calculate from all relevant rows in the provided excerpts. "
+        "For edit/change requests, describe the precise document changes needed unless an editing workflow has already produced a file. "
+        "If the excerpts do not contain enough information, say exactly what is missing instead of guessing."
+    )
+    parts = []
+    if memory:
+        parts.append(f"Recent conversation:\n{memory}")
+    parts.append(f"Relevant extracted document content:\n{context}")
+    return generate_response(f"{instruction}\n\nUser question:\n{query}", "\n\n".join(parts))
 
 
 def wants_web_question(query: str) -> bool:
