@@ -50,8 +50,19 @@ def generate_image(prompt: str, tenant_id: str | None = None) -> Path | str:
             "Set ALLOW_IMAGE_EXTERNAL_FALLBACK=true to use Pollinations."
         )
 
-    url = f"https://image.pollinations.ai/prompt/{quote(prompt)}"
-    response = requests.get(url, timeout=90)
+    # ✅ Updated to new endpoint
+    url = f"https://gen.pollinations.ai/image/{quote(prompt)}?model=flux&nologo=true"
+
+    headers = {}
+    api_key = getattr(settings, "pollinations_api_key", None)
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    else:
+        raise RuntimeError(
+            "POLLINATIONS_API_KEY is not set. Get a free key at https://enter.pollinations.ai"
+        )
+
+    response = requests.get(url, headers=headers, timeout=90)
     response.raise_for_status()
     output = _output_dir(tenant_id) / f"{_safe_name(prompt)}.jpg"
     output.write_bytes(response.content)

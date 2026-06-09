@@ -27,6 +27,7 @@ class Settings:
     image_backend: str
     stable_diffusion_model: str
     allow_image_external_fallback: bool
+    pollinations_api_key: str 
     tavily_api_key: str
     tavily_search_depth: str
     tavily_max_results: int
@@ -81,6 +82,7 @@ def load_settings() -> Settings:
         stable_diffusion_model=os.getenv("STABLE_DIFFUSION_MODEL", ""),
         allow_image_external_fallback=os.getenv("ALLOW_IMAGE_EXTERNAL_FALLBACK", "false").lower()
         in {"1", "true", "yes"},
+        pollinations_api_key=os.getenv("POLLINATIONS_API_KEY", ""),
         tavily_api_key=os.getenv("TAVILY_API_KEY", ""),
         tavily_search_depth=os.getenv("TAVILY_SEARCH_DEPTH", "basic"),
         tavily_max_results=int(os.getenv("TAVILY_MAX_RESULTS", "5")),
